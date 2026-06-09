@@ -66,6 +66,7 @@ function renderCards(s) {
     ['Indexers', s.indexers], ['Enabled', s.enabled],
     ['Total grabs', (s.totalGrabs || 0).toLocaleString()],
     ['Remove candidates', s.removeCandidates], ['Watch (high cost)', s.watchCandidates],
+    ['Manual (interactive-only)', s.manual ?? 0],
   ];
   document.getElementById('cards').innerHTML = cards.map(
     ([l, n]) => `<div class="card"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
@@ -133,7 +134,7 @@ function renderTable() {
   const head = '<thead><tr>'+COLS.map(([k,l])=>
     `<th data-k="${k}">${l}${sortKey===k?(sortDir<0?' ▾':' ▴'):''}</th>`).join('')+'</tr></thead>';
   const body = '<tbody>'+r.map(row=>{
-    const cls = row.flag==='remove'?'remove':row.flag==='watch'?'watch':!row.enabled?'disabled':'';
+    const cls = row.flag==='remove'?'remove':row.flag==='watch'?'watch':row.flag==='manual'?'manual':!row.enabled?'disabled':'';
     const cell = k => {
       if(k==='protocol') return `<span class="pill ${row.protocol}">${row.protocol}</span>`;
       if(k==='flag') return row.flag?`<span class="pill ${row.flag}">${row.flag}</span>`:'';

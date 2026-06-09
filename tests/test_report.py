@@ -4,12 +4,26 @@ from app.prowlarr import compute_report, normalize_source
 
 NOW = _dt.datetime(2026, 6, 8, 12, 0, 0, tzinfo=_dt.UTC)
 
+# Profile 1 = auto-search on; profile 2 = manual/interactive-only (auto off).
+APP_PROFILES = [
+    {"id": 1, "name": "Auto", "enableAutomaticSearch": True},
+    {"id": 2, "name": "Manual", "enableAutomaticSearch": False},
+]
+
 INDEXERS = [
-    {"id": 1, "name": "DrunkenSlug", "protocol": "usenet", "enable": True, "priority": 10},
-    {"id": 2, "name": "DeadTracker", "protocol": "torrent", "enable": True, "priority": 25},
-    {"id": 3, "name": "HighCost", "protocol": "torrent", "enable": True, "priority": 25},
-    {"id": 4, "name": "ColdOne", "protocol": "usenet", "enable": True, "priority": 25},
-    {"id": 5, "name": "OffNever", "protocol": "torrent", "enable": False, "priority": 50},
+    {"id": 1, "name": "DrunkenSlug", "protocol": "usenet", "enable": True, "priority": 10,
+     "appProfileId": 1},
+    {"id": 2, "name": "DeadTracker", "protocol": "torrent", "enable": True, "priority": 25,
+     "appProfileId": 1},
+    {"id": 3, "name": "HighCost", "protocol": "torrent", "enable": True, "priority": 25,
+     "appProfileId": 1},
+    {"id": 4, "name": "ColdOne", "protocol": "usenet", "enable": True, "priority": 25,
+     "appProfileId": 1},
+    {"id": 5, "name": "OffNever", "protocol": "torrent", "enable": False, "priority": 50,
+     "appProfileId": 1},
+    # Manual-only profile, zero grabs — should be neutral "manual", NOT "remove".
+    {"id": 6, "name": "ManualOnly", "protocol": "torrent", "enable": True, "priority": 25,
+     "appProfileId": 2},
 ]
 
 ALL_STATS = [
@@ -19,6 +33,7 @@ ALL_STATS = [
     {"indexerId": 3, "numberOfQueries": 9000, "numberOfGrabs": 20, "numberOfFailedQueries": 5},
     {"indexerId": 4, "numberOfQueries": 2000, "numberOfGrabs": 40, "numberOfFailedQueries": 0},
     {"indexerId": 5, "numberOfQueries": 0, "numberOfGrabs": 0, "numberOfFailedQueries": 0},
+    {"indexerId": 6, "numberOfQueries": 300, "numberOfGrabs": 0, "numberOfFailedQueries": 0},
 ]
 
 # Window stats: indexer 4 went cold (0 grabs in window), others have recent grabs.
@@ -41,6 +56,7 @@ def _report():
     return compute_report(
         indexers=INDEXERS, all_stats=ALL_STATS, window_stats=WINDOW_STATS,
         d30_stats=D30_STATS, history=HISTORY, window_days=90, generated_at=NOW,
+        app_profiles=APP_PROFILES,
     )
 
 
@@ -51,9 +67,10 @@ def _by_name(report):
 def test_summary_counts():
     r = _report()
     s = r["summary"]
-    assert s["indexers"] == 5
-    assert s["enabled"] == 4
-    assert s["totalGrabs"] == 560  # 500 + 0 + 20 + 40 + 0
+    assert s["indexers"] == 6
+    assert s["enabled"] == 5
+    assert s["totalGrabs"] == 560  # 500 + 0 + 20 + 40 + 0 + 0
+    assert s["manual"] == 1
     assert r["windowDays"] == 90
 
 
@@ -78,6 +95,33 @@ def test_remove_flag_went_cold_uses_last_grab_date():
 def test_watch_flag_high_cost_low_yield():
     row = _by_name(_report())["HighCost"]  # 9000 queries, 20 grabs -> 0.22%
     assert row["flag"] == "watch"
+
+
+def test_manual_profile_indexer_is_neutral_not_remove():
+    row = _by_name(_report())["ManualOnly"]
+    assert row["flag"] == "manual"          # neutral, despite 0 grabs
+    assert row["autoSearch"] is False
+    assert row["appProfile"] == "Manual"
+    assert "automatic search off" in row["reason"]
+
+
+def test_manual_indexers_excluded_from_remove():
+    r = _report()
+    removes = [x["name"] for x in r["indexers"] if x["flag"] == "remove"]
+    assert "ManualOnly" not in removes
+    # only auto-search indexers can be remove candidates
+    assert all(x["autoSearch"] for x in r["indexers"] if x["flag"] == "remove")
+
+
+def test_missing_profile_defaults_to_auto():
+    # No app_profiles passed -> every indexer treated as auto-search (back-compat).
+    r = compute_report(
+        indexers=INDEXERS, all_stats=ALL_STATS, window_stats=WINDOW_STATS,
+        d30_stats=D30_STATS, history=HISTORY, window_days=90, generated_at=NOW,
+    )
+    row = _by_name(r)["ManualOnly"]
+    assert row["autoSearch"] is True
+    assert row["flag"] == "remove"  # 0 grabs, now treated as auto
 
 
 def test_disabled_never_grabbed_flag():

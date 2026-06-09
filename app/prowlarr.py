@@ -52,6 +52,16 @@ class ProwlarrClient:
     async def indexers(self) -> list[dict]:
         return await self._get("/api/v1/indexer")
 
+    async def app_profiles(self) -> list[dict]:
+        """App Sync Profiles — carry enableAutomaticSearch / Rss / Interactive.
+
+        Each indexer references one via ``appProfileId``; a profile with
+        ``enableAutomaticSearch == false`` means the indexer is only used for
+        manual/interactive search, so zero automated grabs is expected, not a
+        sign it's useless.
+        """
+        return await self._get("/api/v1/appprofile")
+
     async def stats(
         self, start: _dt.datetime | None = None, end: _dt.datetime | None = None
     ) -> list[dict]:
@@ -120,11 +130,20 @@ def compute_report(
     window_days: int,
     generated_at: _dt.datetime,
     history_truncated: bool = False,
+    app_profiles: list[dict] | None = None,
 ) -> dict:
     """Pure transform of raw Prowlarr payloads into the report data model."""
     all_by = _stats_by_id(all_stats)
     win_by = _stats_by_id(window_stats)
     d30_by = _stats_by_id(d30_stats)
+
+    # appProfileId -> (auto-search enabled?, profile name). Missing profile
+    # defaults to auto=True so we never hide a real auto indexer behind "manual".
+    prof_auto: dict[int, bool] = {}
+    prof_name: dict[int, str] = {}
+    for p in app_profiles or []:
+        prof_auto[p["id"]] = bool(p.get("enableAutomaticSearch", True))
+        prof_name[p["id"]] = p.get("name", "")
 
     per_app: dict[int, dict[str, int]] = {}
     timeline: dict[str, int] = {}
@@ -161,19 +180,31 @@ def compute_report(
         grab_rate = (grabs_all / queries) if queries else 0.0
         fail_rate = (failed_q / queries) if queries else 0.0
 
+        pid = ix.get("appProfileId")
+        auto_search = prof_auto.get(pid, True)
+        profile_name = prof_name.get(pid, "")
+
+        # Flag precedence: disabled > manual (neutral) > remove/watch. Only
+        # auto-search indexers are eligible for remove/watch — a manual/
+        # interactive-only profile is *expected* to have no automated grabs, so
+        # it gets the neutral "manual" tag instead of being called dead weight.
         flag, reason = "", ""
-        if ix.get("enable", True):
+        if not ix.get("enable", True):
             if grabs_all == 0:
-                flag, reason = "remove", f"Never grabbed anything ({queries} queries)"
-            elif grabs_win == 0:
-                last = (last_grab.get(iid, "") or "")[:10] or "unknown"
-                flag, reason = "remove", f"No grabs in {window_days}d (last: {last})"
-            elif queries >= 5000 and grab_rate < 0.005:
-                flag, reason = "watch", (
-                    f"High cost: {queries} queries, {grab_rate * 100:.2f}% grab rate"
-                )
+                flag, reason = "disabled", "Already disabled, never grabbed"
+        elif not auto_search:
+            flag, reason = "manual", (
+                f"Manual/interactive-only profile ({profile_name}) — automatic search off"
+            )
         elif grabs_all == 0:
-            flag, reason = "disabled", "Already disabled, never grabbed"
+            flag, reason = "remove", f"Never grabbed anything ({queries} queries)"
+        elif grabs_win == 0:
+            last = (last_grab.get(iid, "") or "")[:10] or "unknown"
+            flag, reason = "remove", f"No grabs in {window_days}d (last: {last})"
+        elif queries >= 5000 and grab_rate < 0.005:
+            flag, reason = "watch", (
+                f"High cost: {queries} queries, {grab_rate * 100:.2f}% grab rate"
+            )
 
         rows.append(
             {
@@ -192,6 +223,8 @@ def compute_report(
                 "grabRespTime": a.get("averageGrabResponseTime", 0) or 0,
                 "lastGrab": (last_grab.get(iid, "") or "")[:10],
                 "perApp": per_app.get(iid, {}),
+                "autoSearch": auto_search,
+                "appProfile": profile_name,
                 "flag": flag,
                 "reason": reason,
             }
@@ -204,6 +237,7 @@ def compute_report(
         "totalGrabs": sum(r["grabsAll"] for r in rows),
         "removeCandidates": sum(1 for r in rows if r["flag"] == "remove"),
         "watchCandidates": sum(1 for r in rows if r["flag"] == "watch"),
+        "manual": sum(1 for r in rows if r["flag"] == "manual"),
     }
     span_days = None
     if earliest_grab and latest_grab:
@@ -235,6 +269,7 @@ async def build_report(client: ProwlarrClient, window_days: int) -> dict:
     d30_start = now - _dt.timedelta(days=30)
 
     indexers = await client.indexers()
+    app_profiles = await client.app_profiles()
     all_stats = await client.stats()
     window_stats = await client.stats(window_start, now)
     d30_stats = await client.stats(d30_start, now)
@@ -249,4 +284,5 @@ async def build_report(client: ProwlarrClient, window_days: int) -> dict:
         window_days=window_days,
         generated_at=now,
         history_truncated=history_truncated,
+        app_profiles=app_profiles,
     )

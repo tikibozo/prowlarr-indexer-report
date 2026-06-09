@@ -45,16 +45,23 @@ toolbar (it's there, not under Settings → General). The header shows the actua
 span (`full history since <date>`), and a banner warns if paging ever hits its
 safety cap so nothing is silently dropped.
 
-### Removal heuristic
+### Flags
 
-An enabled indexer is flagged:
+Each enabled indexer gets at most one flag, in priority order:
 
-- **remove** — never grabbed anything (pure query cost), or no grabs within the
-  recent window (gone cold; the last-grab date is shown).
-- **watch** — high query volume (≥5000) but a grab rate under 0.5% (lots of
-  cost for little return).
+- **manual** _(neutral)_ — the indexer's [App Sync Profile](https://wiki.servarr.com/prowlarr/settings#app-profiles)
+  has **Automatic Search off** (manual/interactive-only). Zero automated grabs is
+  *expected* here, so these are never called dead weight — they're broken out so
+  the remove/watch heuristics don't fire on them.
+- **remove** — an **auto-search** indexer that never grabbed anything (pure query
+  cost) or has no grabs within the recent window (gone cold; last-grab date shown).
+- **watch** — an **auto-search** indexer with high query volume (≥5000) but a grab
+  rate under 0.5% (lots of cost for little return).
 
-Disabled indexers that never grabbed are noted but not counted as candidates.
+Only auto-search indexers are eligible for **remove**/**watch**, since those are
+the ones expected to produce automated grabs. Disabled indexers that never grabbed
+are noted (**disabled**) but not counted as candidates. The per-indexer App Profile
+and an `autoSearch` flag are included in the data for transparency.
 
 ## Quick start (Docker)
 
