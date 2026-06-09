@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.3...v0.3.4) (2026-06-09)
+
+
+### Documentation
+
+* fix History Cleanup UI location (History → Options, not Settings) ([99584e8](https://github.com/tikibozo/prowlarr-indexer-report/commit/99584e8340d4fef4f568af084725419417aff472))
+
 ## [0.3.3](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.2...v0.3.3) (2026-06-09)
 
 
