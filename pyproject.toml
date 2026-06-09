@@ -1,6 +1,6 @@
 [project]
 name = "prowlarr-indexer-report"
-version = "0.3.0"
+version = "0.3.1"
 description = "Live web report ranking Prowlarr indexers by grabs, trend, query cost, and per-app source — so you can see which indexers earn their keep."
 readme = "README.md"
 requires-python = ">=3.13"
