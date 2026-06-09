@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.1...v0.3.2) (2026-06-09)
+
+
+### Documentation
+
+* add report screenshot to README ([23da334](https://github.com/tikibozo/prowlarr-indexer-report/commit/23da334bc3afb22e293ce707307c300350e3cc0a))
+
 ## [0.3.1](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.0...v0.3.1) (2026-06-09)
 
 
