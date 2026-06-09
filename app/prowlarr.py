@@ -67,7 +67,7 @@ class ProwlarrClient:
         """Page ALL grab events (eventType=1) Prowlarr retains.
 
         Prowlarr aggregates indexerstats from the same History table it serves
-        here, and prunes both at ``historycleanupdays`` (default 365) — so "all
+        here, and prunes both at ``historycleanupdays`` (default 30) — so "all
         retained history" is the most that exists, and this pages every page of
         it. Returns ``(records, truncated)``; ``truncated`` is True only if we
         hit ``max_pages`` before exhausting ``totalRecords`` (a safety backstop,
