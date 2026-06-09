@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.4...v0.4.0) (2026-06-09)
+
+
+### Features
+
+* add neutral "manual" flag, restrict remove/watch to auto-search indexers ([f340cb4](https://github.com/tikibozo/prowlarr-indexer-report/commit/f340cb48bbe6304141d759deffa517f7eae585fa))
+
 ## [0.3.4](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.3...v0.3.4) (2026-06-09)
 
 
