@@ -61,9 +61,20 @@ class ProwlarrClient:
         data = await self._get("/api/v1/indexerstats", params=params)
         return data.get("indexers", [])
 
-    async def history_grabs(self, *, page_size: int = 1000, max_pages: int = 100) -> list[dict]:
-        """Page all grab events (eventType=1, descending by date)."""
+    async def history_grabs(
+        self, *, page_size: int = 1000, max_pages: int = 250
+    ) -> tuple[list[dict], bool]:
+        """Page ALL grab events (eventType=1) Prowlarr retains.
+
+        Prowlarr aggregates indexerstats from the same History table it serves
+        here, and prunes both at ``historycleanupdays`` (default 365) — so "all
+        retained history" is the most that exists, and this pages every page of
+        it. Returns ``(records, truncated)``; ``truncated`` is True only if we
+        hit ``max_pages`` before exhausting ``totalRecords`` (a safety backstop,
+        not normally reached — surfaced to the UI so truncation is never silent).
+        """
         out: list[dict] = []
+        truncated = False
         for page in range(1, max_pages + 1):
             data = await self._get(
                 "/api/v1/history",
@@ -80,7 +91,9 @@ class ProwlarrClient:
             total = data.get("totalRecords", 0)
             if len(out) >= total or not records:
                 break
-        return out
+            if page == max_pages:
+                truncated = True
+        return out, truncated
 
 
 def normalize_source(src: str | None) -> str:
@@ -106,6 +119,7 @@ def compute_report(
     history: list[dict],
     window_days: int,
     generated_at: _dt.datetime,
+    history_truncated: bool = False,
 ) -> dict:
     """Pure transform of raw Prowlarr payloads into the report data model."""
     all_by = _stats_by_id(all_stats)
@@ -116,6 +130,8 @@ def compute_report(
     timeline: dict[str, int] = {}
     last_grab: dict[int, str] = {}
     apps_seen: set[str] = set()
+    earliest_grab: str | None = None  # span of grab history actually retained
+    latest_grab: str | None = None
     for rec in history:
         iid = rec.get("indexerId")
         app = normalize_source((rec.get("data") or {}).get("source"))
@@ -128,6 +144,10 @@ def compute_report(
             timeline[month] = timeline.get(month, 0) + 1
             if iid not in last_grab or date > last_grab[iid]:
                 last_grab[iid] = date
+            if earliest_grab is None or date < earliest_grab:
+                earliest_grab = date
+            if latest_grab is None or date > latest_grab:
+                latest_grab = date
 
     rows: list[dict] = []
     for ix in indexers:
@@ -185,10 +205,23 @@ def compute_report(
         "removeCandidates": sum(1 for r in rows if r["flag"] == "remove"),
         "watchCandidates": sum(1 for r in rows if r["flag"] == "watch"),
     }
+    span_days = None
+    if earliest_grab and latest_grab:
+        span_days = (_dt.datetime.fromisoformat(latest_grab.replace("Z", "+00:00"))
+                     - _dt.datetime.fromisoformat(earliest_grab.replace("Z", "+00:00"))).days
     return {
         "generatedAt": iso(generated_at),
         "windowDays": window_days,
         "summary": summary,
+        # Span of grab history Prowlarr actually retains (bounded by its
+        # historycleanupdays). historyTruncated flags the rare case where paging
+        # hit its page cap, so the UI can warn instead of silently undercounting.
+        "history": {
+            "start": (earliest_grab or "")[:10],
+            "end": (latest_grab or "")[:10],
+            "spanDays": span_days,
+            "truncated": history_truncated,
+        },
         "indexers": rows,
         "apps": sorted(apps_seen),
         "timeline": sorted(timeline.items()),
@@ -205,7 +238,7 @@ async def build_report(client: ProwlarrClient, window_days: int) -> dict:
     all_stats = await client.stats()
     window_stats = await client.stats(window_start, now)
     d30_stats = await client.stats(d30_start, now)
-    history = await client.history_grabs()
+    history, history_truncated = await client.history_grabs()
 
     return compute_report(
         indexers=indexers,
@@ -215,4 +248,5 @@ async def build_report(client: ProwlarrClient, window_days: int) -> dict:
         history=history,
         window_days=window_days,
         generated_at=now,
+        history_truncated=history_truncated,
     )

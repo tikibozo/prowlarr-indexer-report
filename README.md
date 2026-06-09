@@ -29,6 +29,17 @@ straight from `indexerstats`, which accepts `startDate`/`endDate`. The per-app
 breakdown and the monthly timeline are reconstructed from grab history (the only
 endpoint that records which app consumed each grab).
 
+### History coverage
+
+The report shows the **full grab history Prowlarr retains** — every page of
+`/api/v1/history` is read (no client-side cap in practice), and `indexerstats`
+totals match it because Prowlarr derives both from the same History table.
+Prowlarr prunes that table at its `historycleanupdays` setting (default **365
+days**), so "all-time" really means "all retained history": once an instance is
+older than that window, the oldest day rolls off daily. The header shows the
+actual span (`full history since <date>`), and a banner warns if paging ever hits
+its safety cap so nothing is silently dropped.
+
 ### Removal heuristic
 
 An enabled indexer is flagged:

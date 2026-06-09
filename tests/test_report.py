@@ -115,6 +115,23 @@ def test_timeline_monthly_buckets():
     assert tl["2026-01"] == 1
 
 
+def test_history_span_reflects_full_retained_range():
+    h = _report()["history"]
+    assert h["start"] == "2026-01-15"  # oldest grab in HISTORY
+    assert h["end"] == "2026-06-02"    # newest grab in HISTORY
+    assert h["spanDays"] == 138
+    assert h["truncated"] is False
+
+
+def test_history_truncated_flag_passthrough():
+    r = compute_report(
+        indexers=INDEXERS, all_stats=ALL_STATS, window_stats=WINDOW_STATS,
+        d30_stats=D30_STATS, history=HISTORY, window_days=90, generated_at=NOW,
+        history_truncated=True,
+    )
+    assert r["history"]["truncated"] is True
+
+
 def test_normalize_source():
     assert normalize_source("Sonarr") == "Sonarr"
     assert normalize_source("radarr (4k)") == "Radarr"

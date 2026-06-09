@@ -36,9 +36,21 @@ function setStatus(data, err) {
     banner.textContent = 'Could not reach the report service: ' + err;
     return;
   }
-  banner.style.display = data.lastError ? 'block' : 'none';
-  if (data.lastError) banner.textContent = 'Last Prowlarr refresh failed: ' + data.lastError;
-  dot.className = 'dot' + (data.lastError ? ' stale' : '');
+  // History coverage: the full span Prowlarr retains (bounded by its
+  // historycleanupdays). Shows we're displaying everything available.
+  const h = data.history || {};
+  const cov = document.getElementById('coverage');
+  if (h.start) {
+    const months = h.spanDays != null ? ' (' + (h.spanDays / 30.44).toFixed(1) + ' mo)' : '';
+    cov.textContent = ' · full history since ' + h.start + months;
+  } else {
+    cov.textContent = '';
+  }
+  const warn = h.truncated ? 'History was truncated at the page cap — some older grabs are not shown. ' : '';
+  banner.style.display = (data.lastError || h.truncated) ? 'block' : 'none';
+  if (data.lastError) banner.textContent = warn + 'Last Prowlarr refresh failed: ' + data.lastError;
+  else if (h.truncated) banner.textContent = warn;
+  dot.className = 'dot' + (data.lastError || h.truncated ? ' stale' : '');
   txt.textContent = 'data ' + fmtAgo(data.generatedAt) +
     ' · window ' + data.windowDays + 'd' +
     (data.refreshIntervalMinutes ? ' · server refresh ' + data.refreshIntervalMinutes + 'm' : '');
