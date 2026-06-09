@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.2...v0.3.3) (2026-06-09)
+
+
+### Documentation
+
+* correct Prowlarr history retention default (30d, not 365d) ([88f00de](https://github.com/tikibozo/prowlarr-indexer-report/commit/88f00ded101bc0c8d7184ab24e2d2e63549485cb))
+
 ## [0.3.2](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.1...v0.3.2) (2026-06-09)
 
 
