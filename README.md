@@ -34,14 +34,16 @@ endpoint that records which app consumed each grab).
 The report shows the **full grab history Prowlarr retains** — every page of
 `/api/v1/history` is read (no client-side cap in practice), and `indexerstats`
 totals match it because Prowlarr derives both from the same History table.
-Prowlarr prunes that table at its **History Cleanup** setting
+Prowlarr prunes that table via its **History Cleanup** setting
 (`historycleanupdays`, **default 30 days** — unlike Sonarr/Radarr, which default
-to 365). So "all-time" really means "all retained history": on a default
-Prowlarr that's only the last ~30 days, and once an instance is older than the
-configured window the oldest day rolls off daily. Raise it under
-**Settings → General → History Cleanup** if you want a longer view. The header
-shows the actual span (`full history since <date>`), and a banner warns if paging
-ever hits its safety cap so nothing is silently dropped.
+to 365). A cleanup task runs every 24h and deletes history older than that many
+days (set it to `0` to keep history forever). So "all-time" really means "all
+retained history": on a default Prowlarr that's only the last ~30 days, and once
+an instance is older than the configured window the oldest day rolls off daily.
+To change it, open the **History** page and click **Options** in the top-right
+toolbar (it's there, not under Settings → General). The header shows the actual
+span (`full history since <date>`), and a banner warns if paging ever hits its
+safety cap so nothing is silently dropped.
 
 ### Removal heuristic
 
