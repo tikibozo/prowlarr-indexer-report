@@ -9,7 +9,7 @@ to disable** — so you can tell which of your indexers actually earn their keep
 The page is live: a background task re-queries Prowlarr on an interval and the
 UI polls for the latest snapshot, so charts stay current without a reload.
 
-![charts: grabs by indexer, recent trend, efficiency scatter, per-app breakdown, timeline, plus a sortable table with removal flags]
+![Prowlarr Indexer Usefulness Report — summary cards, grabs-by-indexer bar chart, recent-trend and efficiency charts, per-app source breakdown, grabs-over-time timeline, and a sortable table with removal flags (indexer names anonymized)](docs/report.png)
 
 ## How it works
 
