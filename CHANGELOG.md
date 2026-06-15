@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.4.0...v0.4.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **security:** patch OpenSSL CVE-2026-45447 in base image ([#12](https://github.com/tikibozo/prowlarr-indexer-report/issues/12)) ([e22616f](https://github.com/tikibozo/prowlarr-indexer-report/commit/e22616f55205b34e7a81dbb575a7120ec29a2af8))
+
 ## [0.4.0](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.3.4...v0.4.0) (2026-06-09)
 
 
