@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.5.0...v0.5.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* **ui:** don't size Analysis charts while the panel is collapsed ([#17](https://github.com/tikibozo/prowlarr-indexer-report/issues/17)) ([ce78d1d](https://github.com/tikibozo/prowlarr-indexer-report/commit/ce78d1dc64d430cd76c94cebc065933c9fb7f55c))
+
 ## [0.5.0](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.4.1...v0.5.0) (2026-06-26)
 
 
