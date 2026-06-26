@@ -4,54 +4,175 @@
 <title>Prowlarr Indexer Report</title>
 <script src="/static/chart.umd.min.js"></script>
 <style>
-  :root{--bg:#0f1420;--panel:#1a2133;--ink:#e6ebf5;--mut:#8a96ad;--line:#2a3450;
-        --usenet:#4ea1ff;--torrent:#ffb454;--remove:#ff5c6c;--watch:#ffcf5c;--ok:#7ce38b;}
+  /* Single source of truth for color. app.js reads these via getComputedStyle,
+     so there is no JS color table to drift out of sync. */
+  :root{
+    --bg:#0f1420; --panel:#1a2133; --panel-2:#202a40; --line:#2a3450;
+    --ink:#e6ebf5; --mut:#8a96ad;
+    --usenet:#4ea1ff; --torrent:#ffb454;
+    --remove:#ff5c6c; --watch:#ffcf5c; --manual:#5cd0d0; --ok:#7ce38b;
+    /* categorical per-app series */
+    --app-1:#4ea1ff; --app-2:#ffb454; --app-3:#7ce38b; --app-4:#c08cff;
+    --app-5:#ff8fab; --app-6:#5cd0d0; --app-7:#d0d0d0;
+    /* z-index scale */
+    --z-sticky:10;
+  }
   *{box-sizing:border-box}
+  .vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+      clip:rect(0 0 0 0);white-space:nowrap;border:0}
   body{margin:0;background:var(--bg);color:var(--ink);
        font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+
+  /* ---- Header / status ---- */
   header{padding:22px 28px 6px;display:flex;flex-wrap:wrap;align-items:baseline;gap:14px}
-  h1{margin:0;font-size:22px}
+  h1{margin:0;font-size:22px;letter-spacing:-.01em}
   .sub{color:var(--mut);font-size:13px}
   .status{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--mut)}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
-  .dot.stale{background:var(--watch)} .dot.err{background:var(--remove)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block;
+       box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
+  .dot.stale{background:var(--watch);box-shadow:0 0 0 3px color-mix(in srgb,var(--watch) 22%,transparent)}
+  .dot.err{background:var(--remove);box-shadow:0 0 0 3px color-mix(in srgb,var(--remove) 22%,transparent)}
+
+  /* ---- Buttons ---- */
   button{background:var(--panel);color:var(--ink);border:1px solid var(--line);
-         border-radius:7px;padding:5px 12px;font-size:12px;cursor:pointer}
-  button:hover{border-color:var(--mut)} button:disabled{opacity:.5;cursor:default}
-  .banner{margin:0 28px;padding:8px 14px;border-radius:8px;background:rgba(255,92,108,.12);
-          border:1px solid rgba(255,92,108,.4);color:#ffb3bb;font-size:13px;display:none}
-  .cards{display:flex;flex-wrap:wrap;gap:14px;padding:16px 28px}
+         border-radius:7px;padding:5px 12px;font-size:12px;cursor:pointer;
+         transition:border-color .15s ease,background .15s ease}
+  button:hover{border-color:var(--mut)}
+  button:disabled{opacity:.5;cursor:default}
+  .btn-link{display:inline-block;text-decoration:none;background:var(--panel);color:var(--ink);
+            border:1px solid var(--line);border-radius:7px;padding:5px 12px;font-size:12px;
+            transition:border-color .15s ease}
+  .btn-link:hover{border-color:var(--mut)}
+  :focus-visible{outline:2px solid var(--usenet);outline-offset:2px;border-radius:7px}
+
+  .banner{margin:10px 28px 0;padding:8px 14px;border-radius:7px;
+          background:color-mix(in srgb,var(--remove) 12%,transparent);
+          border:1px solid color-mix(in srgb,var(--remove) 40%,transparent);
+          color:color-mix(in srgb,var(--remove) 55%,var(--ink));font-size:13px;display:none}
+
+  /* ---- Cards ---- */
+  .cards{display:flex;flex-wrap:wrap;gap:14px;padding:16px 28px 4px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-        padding:14px 18px;min-width:150px}
-  .card .n{font-size:26px;font-weight:700}
-  .card .l{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:8px 28px 28px}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
-  .panel h2{margin:0 0 4px;font-size:15px}
-  .panel .h{color:var(--mut);font-size:12px;margin-bottom:10px}
-  .wide{grid-column:1/-1}
-  canvas{max-height:340px}
-  .tall canvas{max-height:520px}
+        padding:12px 16px;min-width:138px}
+  .card .n{font-size:24px;font-weight:700;line-height:1.1}
+  .card .l{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+  /* verdict cards differentiate by ROLE (color + interactivity), not size */
+  .card.verdict-card{cursor:pointer;background:var(--panel-2)}
+  .card.verdict-card .n{color:var(--c)}
+  .card.verdict-card .l{display:flex;align-items:center;gap:6px}
+  .card.verdict-card[aria-disabled="true"]{cursor:default;opacity:.55}
+  .card.verdict-card:not([aria-disabled="true"]):hover{border-color:var(--c)}
+  .card.verdict-card.active{border-color:var(--c);box-shadow:inset 0 0 0 1px var(--c)}
+  .card-sep{flex:0 0 1px;align-self:stretch;background:var(--line);margin:2px 4px}
+
+  /* ---- Verdict (the lede) ---- */
+  .verdict{margin:14px 28px 0;background:var(--panel);border:1px solid var(--line);
+           border-radius:12px;padding:18px 20px}
+  .vhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 14px;margin-bottom:14px}
+  .vhead h2{margin:0;font-size:17px}
+  .vhead .vsub{color:var(--mut);font-size:13px;font-weight:400}
+  .vhead .spacer{margin-left:auto}
+  .vlists{display:grid;grid-template-columns:1fr 1fr;gap:16px 22px}
+  .vcol-head{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);
+             margin-bottom:8px}
+  .killlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;
+            max-height:300px;overflow:auto}
+  .kill{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:baseline;
+        padding:8px 11px;border-radius:7px;border:1px solid var(--line);background:var(--bg)}
+  .kill.remove{background:color-mix(in srgb,var(--remove) 9%,var(--bg))}
+  .kill.watch{background:color-mix(in srgb,var(--watch) 8%,var(--bg))}
+  .kill .kname{font-weight:600;font-size:13.5px}
+  a.kname{color:var(--ink);text-decoration:none}
+  a.kname:hover{text-decoration:underline;text-decoration-color:var(--mut)}
+  a.kname::after{content:" ↗";color:var(--mut);font-size:11px;font-weight:400}
+  .kill .kmeta{color:var(--mut);font-size:11.5px;text-align:right;white-space:nowrap}
+  .kill .kreason{grid-column:1/-1;color:var(--mut);font-size:12px}
+  .verdict .empty{color:var(--mut);font-size:13.5px;padding:6px 0}
+  .verdict .empty b{color:var(--ok);font-weight:600}
+
+  /* ---- Table section ---- */
+  .section{margin:18px 28px 0}
+  .section > h2{margin:0 0 4px;font-size:15px}
+  .section .h{color:var(--mut);font-size:12px;margin-bottom:10px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .chip{background:var(--panel);color:var(--mut);border:1px solid var(--line);
+        border-radius:20px;padding:3px 12px;font-size:12px;cursor:pointer;
+        transition:border-color .15s ease,color .15s ease,background .15s ease}
+  .chip:hover{color:var(--ink)}
+  .chip[aria-pressed="true"]{color:var(--ink);border-color:var(--mut);background:var(--panel-2)}
+  .chip .cn{color:var(--mut);font-variant-numeric:tabular-nums}
+  .chip[aria-pressed="true"] .cn{color:var(--ink)}
+
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
   th:first-child,td:first-child{text-align:left}
-  th{position:sticky;top:0;background:var(--panel);cursor:pointer;user-select:none;color:var(--mut)}
-  th:hover{color:var(--ink)}
-  tr.remove{background:rgba(255,92,108,.10)}
-  tr.watch{background:rgba(255,207,92,.08)}
-  tr.manual{background:rgba(92,208,208,.06)}
+  th{position:sticky;top:0;background:var(--panel);z-index:var(--z-sticky);padding:0}
+  th button{all:unset;display:block;width:100%;box-sizing:border-box;padding:7px 9px;
+            text-align:right;color:var(--mut);cursor:pointer;font:inherit;font-size:13px}
+  th:first-child button{text-align:left}
+  th button:hover{color:var(--ink)}
+  th[aria-sort] button{color:var(--ink)}
+  tr.remove{background:color-mix(in srgb,var(--remove) 10%,transparent)}
+  tr.watch{background:color-mix(in srgb,var(--watch) 8%,transparent)}
+  tr.manual{background:color-mix(in srgb,var(--manual) 6%,transparent)}
   tr.disabled{opacity:.5}
   .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;font-weight:600}
-  .pill.remove{background:var(--remove);color:#1a0508}
-  .pill.watch{background:var(--watch);color:#241c00}
-  .pill.manual{background:rgba(92,208,208,.18);color:#8fe0e0}
+  .pill.remove{background:var(--remove);color:var(--bg)}
+  .pill.watch{background:var(--watch);color:var(--bg)}
+  .pill.manual{background:color-mix(in srgb,var(--manual) 20%,transparent);color:var(--manual)}
   .pill.disabled{background:var(--line);color:var(--mut)}
-  .pill.usenet{background:rgba(78,161,255,.18);color:var(--usenet)}
-  .pill.torrent{background:rgba(255,180,84,.18);color:var(--torrent)}
+  .pill.usenet{background:color-mix(in srgb,var(--usenet) 18%,transparent);color:var(--usenet)}
+  .pill.torrent{background:color-mix(in srgb,var(--torrent) 18%,transparent);color:var(--torrent)}
   .reason{color:var(--mut);font-size:12px;text-align:left;white-space:normal;max-width:260px}
-  .tablewrap{max-height:680px;overflow:auto;border-radius:10px}
-  code{background:#0c1020;padding:1px 5px;border-radius:4px;color:#9fb4d6}
-  .loading{padding:60px 28px;color:var(--mut);text-align:center}
+  .tablewrap{max-height:680px;overflow:auto;border:1px solid var(--line);border-radius:10px;
+             -webkit-overflow-scrolling:touch}
+  code{background:var(--bg);padding:1px 5px;border-radius:4px;
+       color:color-mix(in srgb,var(--usenet) 45%,var(--ink))}
+
+  /* ---- Analysis (evidence, collapsible) ---- */
+  details.analysis{margin:18px 28px 28px}
+  details.analysis > summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;
+            font-size:15px;font-weight:600;padding:6px 0;color:var(--ink)}
+  details.analysis > summary::-webkit-details-marker{display:none}
+  details.analysis > summary::before{content:"▸";color:var(--mut);font-size:12px;transition:transform .15s ease}
+  details.analysis[open] > summary::before{transform:rotate(90deg)}
+  details.analysis > summary .h{color:var(--mut);font-size:12px;font-weight:400}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:12px 0 0}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .panel h2{margin:0 0 4px;font-size:15px}
+  .panel .h{color:var(--mut);font-size:12px;margin-bottom:10px}
+  .panel .legend{display:inline-flex;flex-wrap:wrap;gap:4px 12px;margin-left:0;color:var(--mut)}
+  .legk{display:inline-flex;align-items:center;gap:5px}
+  .legk i{font-style:normal;color:var(--ink)}
+  .wide{grid-column:1/-1}
+  canvas{max-height:340px}
+  .tall canvas{max-height:520px}
+
+  /* ---- Skeleton loading ---- */
+  .skeleton{padding:16px 28px}
+  .sk{background:linear-gradient(100deg,var(--panel) 30%,var(--panel-2) 50%,var(--panel) 70%);
+      background-size:200% 100%;border-radius:10px;animation:sk 1.3s ease-in-out infinite}
+  .sk-cards{display:flex;flex-wrap:wrap;gap:14px}
+  .sk-card{width:148px;height:64px}
+  .sk-verdict{height:150px;margin-top:14px}
+  .sk-table{height:300px;margin-top:18px}
+  @keyframes sk{to{background-position:-200% 0}}
+  @media (prefers-reduced-motion:reduce){
+    .sk{animation:none}
+    *{scroll-behavior:auto !important}
+  }
+
+  /* ---- Responsive: stack the chart grid and tighten gutters ---- */
+  @media (max-width:900px){
+    header,.cards{padding-left:18px;padding-right:18px}
+    .verdict,.section,details.analysis{margin-left:18px;margin-right:18px}
+    .grid{grid-template-columns:1fr}
+    .wide{grid-column:auto}
+    .vlists{grid-template-columns:1fr}
+    /* stack the kill-item meta under the name so it can't overflow the panel */
+    .kill{grid-template-columns:1fr}
+    .kill .kmeta{text-align:left;white-space:normal;margin-top:1px}
+  }
 </style></head>
 <body>
 <header>
@@ -61,30 +182,65 @@
     <span><span class="dot" id="dot"></span> <span id="statusText">connecting…</span></span>
     <button id="refreshBtn">Refresh now</button>
   </div>
+  <!-- Announces only state transitions (live/stale/error), not the ticking data age. -->
+  <span class="vh" id="a11yStatus" role="status" aria-live="polite"></span>
 </header>
-<div class="banner" id="banner"></div>
-<div id="loading" class="loading">Loading report…</div>
+<div class="banner" id="banner" role="alert"></div>
+
+<!-- Skeleton shown until first data arrives -->
+<div id="loading" class="skeleton" aria-hidden="true">
+  <div class="sk-cards">
+    <div class="sk sk-card"></div><div class="sk sk-card"></div><div class="sk sk-card"></div>
+    <div class="sk sk-card"></div><div class="sk sk-card"></div><div class="sk sk-card"></div>
+  </div>
+  <div class="sk sk-verdict"></div>
+  <div class="sk sk-table"></div>
+</div>
+
 <div id="report" style="display:none">
   <div class="cards" id="cards"></div>
-  <div class="grid">
-    <div class="panel wide tall"><h2>Grabs by indexer (all-time)</h2>
-      <div class="h">Bars colored by protocol. The long tail at the bottom does little for you.</div>
-      <canvas id="grabsBar"></canvas></div>
-    <div class="panel"><h2>Recent trend</h2>
-      <div class="h">30d vs window vs all-time. Flat-at-zero recent bars = gone cold.</div>
-      <canvas id="trend"></canvas></div>
-    <div class="panel"><h2>Efficiency — grabs vs query cost</h2>
-      <div class="h">Log-x queries vs grabs. Bottom-right = lots of queries, few grabs.</div>
-      <canvas id="scatter"></canvas></div>
-    <div class="panel wide"><h2>Per-app source breakdown</h2>
-      <div class="h">Which app each indexer's grabs fed. An indexer may be the main source for one category.</div>
-      <canvas id="perApp"></canvas></div>
-    <div class="panel wide"><h2>Total grabs over time</h2>
-      <div class="h">Monthly grab volume across all indexers.</div>
-      <canvas id="timeline"></canvas></div>
-    <div class="panel wide"><h2>All indexers <span class="h" style="font-weight:400">— click a header to sort</span></h2>
-      <div class="tablewrap"><table id="tbl"></table></div></div>
-  </div>
+
+  <!-- The verdict leads: what to disable, surfaced before the evidence. -->
+  <section class="verdict" id="verdictPanel" aria-labelledby="verdictTitle">
+    <div class="vhead">
+      <h2 id="verdictTitle">The verdict <span class="vsub" id="vsub"></span></h2>
+      <span class="spacer"></span>
+      <a id="openProwlarr" class="btn-link" target="_blank" rel="noopener noreferrer" title="Open Prowlarr's indexer list" hidden>Open Prowlarr ↗</a>
+      <button id="copyDisable" disabled>Copy disable list</button>
+    </div>
+    <div id="verdictBody"></div>
+  </section>
+
+  <section class="section" id="tableSection">
+    <h2 id="tableHeading" tabindex="-1">All indexers</h2>
+    <div class="h">Full drill-down — click a column to sort, or filter to a verdict below.</div>
+    <div class="chips" id="filters" role="group" aria-label="Filter indexers by verdict"></div>
+    <span class="vh" id="filterStatus" role="status" aria-live="polite"></span>
+    <div class="tablewrap"><table id="tbl"></table></div>
+  </section>
+
+  <details class="analysis" open>
+    <summary>Analysis <span class="h">— the evidence behind the verdict</span></summary>
+    <div class="grid">
+      <div class="panel wide tall"><h2>Grabs by indexer (all-time)</h2>
+        <div class="h">The long tail at the bottom does little for you.
+          <span class="legend"><span class="legk"><i>■</i> usenet</span><span class="legk"><i>▨</i> torrent (hatched)</span></span></div>
+        <canvas id="grabsBar"></canvas></div>
+      <div class="panel"><h2>Recent trend</h2>
+        <div class="h">30d vs window vs all-time. Flat-at-zero recent bars = gone cold.</div>
+        <canvas id="trend"></canvas></div>
+      <div class="panel"><h2>Efficiency — grabs vs query cost</h2>
+        <div class="h">Log-x queries vs grabs. Bottom-right = lots of queries, few grabs.
+          <span class="legend"><span class="legk"><i>▲</i> remove</span><span class="legk"><i>■</i> watch</span><span class="legk"><i>●</i> ok</span></span></div>
+        <canvas id="scatter"></canvas></div>
+      <div class="panel wide"><h2>Per-app source breakdown</h2>
+        <div class="h">Which app each indexer's grabs fed. An indexer may be the main source for one category.</div>
+        <canvas id="perApp"></canvas></div>
+      <div class="panel wide"><h2>Total grabs over time</h2>
+        <div class="h">Monthly grab volume across all indexers.</div>
+        <canvas id="timeline"></canvas></div>
+    </div>
+  </details>
 </div>
 <script src="/static/app.js"></script>
 </body></html>

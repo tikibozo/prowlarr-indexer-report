@@ -11,3 +11,7 @@ venv/
 .ruff_cache/
 dist/
 build/
+
+# Local tooling / working artifacts (impeccable skill + critique snapshots)
+.claude/
+.impeccable/
