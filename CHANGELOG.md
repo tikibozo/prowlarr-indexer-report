@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.5.1...v0.5.2) (2026-06-26)
+
+
+### Documentation
+
+* refresh screenshot with the new UI + add a fictional-data mock server ([#19](https://github.com/tikibozo/prowlarr-indexer-report/issues/19)) ([416d232](https://github.com/tikibozo/prowlarr-indexer-report/commit/416d232805a5c32c0cf6f6a58270f391935055c8))
+
 ## [0.5.1](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.5.0...v0.5.1) (2026-06-26)
 
 
