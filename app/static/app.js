@@ -25,6 +25,8 @@ let sortKey = 'grabsAll', sortDir = -1, lastRows = null;
 let tableFilter = 'all';     // all | remove | watch | manual | disabled
 let lastGeneratedAt = null;  // skip re-rendering charts/table when the snapshot is unchanged
 let prowlarrUrl = '';        // browser-facing Prowlarr URL (opt-in); '' = no deep-links
+let lastData = null;         // most recent snapshot, for re-rendering charts on demand
+let chartsStale = false;     // data changed while Analysis was collapsed; redraw on open
 const proColor = p => p === 'usenet' ? C.usenet : C.torrent;
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -349,7 +351,13 @@ function render(d) {
   renderVerdict(d.indexers);
   renderChips();
   renderTable();
-  renderCharts(d);
+  // Only build/refresh charts while the Analysis panel is visible. Chart.js sizes
+  // to its container, so creating charts inside a collapsed <details> (display:none)
+  // bakes in a 0-size and the redraw on reopen is unreliable across browsers. When
+  // collapsed, defer: mark stale and (re)render on the next open.
+  lastData = d;
+  if (analysisIsOpen()) { renderCharts(d); chartsStale = false; }
+  else { chartsStale = true; }
   // re-apply active state after cards re-render
   document.querySelectorAll('.verdict-card').forEach(c =>
     c.classList.toggle('active', c.dataset.filter === tableFilter));
@@ -374,6 +382,18 @@ async function poll() {
 }
 
 /* ---- Wiring (attached once) ---- */
+const analysisEl = document.querySelector('details.analysis');
+function analysisIsOpen() { return !analysisEl || analysisEl.open; }
+
+// Build deferred charts (or just resize existing ones) when Analysis opens, so
+// charts are never sized inside a hidden container.
+if (analysisEl) analysisEl.addEventListener('toggle', () => {
+  if (!analysisEl.open) return;
+  if (chartsStale && lastData) { renderCharts(lastData); chartsStale = false; }
+  else requestAnimationFrame(() =>
+    Object.values(charts).forEach(c => { try { c.resize(); } catch { /* chart gone */ } }));
+});
+
 document.getElementById('refreshBtn').onclick = async (ev) => {
   ev.target.disabled = true;
   ev.target.textContent = 'Refreshing…';
