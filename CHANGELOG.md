@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.4.1...v0.5.0) (2026-06-26)
+
+
+### Features
+
+* **ui:** verdict-first redesign with deep-links, a11y, and grayscale-safe charts ([#15](https://github.com/tikibozo/prowlarr-indexer-report/issues/15)) ([7804d41](https://github.com/tikibozo/prowlarr-indexer-report/commit/7804d4192be762c75ee9b76d6a128115ce4a41df))
+
 ## [0.4.1](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.4.0...v0.4.1) (2026-06-15)
 
 
