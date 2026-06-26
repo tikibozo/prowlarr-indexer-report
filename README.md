@@ -9,7 +9,7 @@ to disable** — so you can tell which of your indexers actually earn their keep
 The page is live: a background task re-queries Prowlarr on an interval and the
 UI polls for the latest snapshot, so charts stay current without a reload.
 
-![Prowlarr Indexer Usefulness Report — summary cards, grabs-by-indexer bar chart, recent-trend and efficiency charts, per-app source breakdown, grabs-over-time timeline, and a sortable table with removal flags (indexer names anonymized)](docs/report.png)
+![Prowlarr Indexer Usefulness Report — a verdict-first dark dashboard: summary cards with remove/watch/manual counts, a "verdict" panel listing the indexers safe to disable with the reason for each, a filterable sortable table of every indexer, and a collapsible Analysis section (grabs by indexer, recent trend, efficiency scatter, per-app source breakdown, grabs-over-time). Shown with demo data; indexer names are fictional.](docs/report.png)
 
 ## How it works
 
@@ -119,7 +119,13 @@ uv run pytest -q
 
 # Run locally against a real Prowlarr:
 PROWLARR_URL=http://localhost:9696 PROWLARR_API_KEY=... uv run uvicorn app.main:app --reload --port 8787
+
+# Preview the UI without a Prowlarr (serves the front-end + fictional demo data):
+python dev/mock_server.py            # then open http://localhost:8787
 ```
+
+`dev/mock_server.py` is stdlib-only (no Prowlarr, no API key, no deps) and is
+what generates the screenshot above; it's handy for UI work.
 
 The analysis lives in `app/prowlarr.py`: `ProwlarrClient` does the async HTTP,
 and `compute_report` is a pure function over the fetched payloads (which is what
