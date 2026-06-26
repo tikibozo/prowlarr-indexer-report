@@ -125,6 +125,7 @@ async def api_data() -> Response:
     payload["refreshIntervalMinutes"] = (
         state.config.refresh_interval_minutes if state.config else None
     )
+    payload["prowlarrUrl"] = state.config.prowlarr_public_url if state.config else ""
     payload["lastError"] = state.last_error
     return JSONResponse(content=payload)
 

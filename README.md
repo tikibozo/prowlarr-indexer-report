@@ -88,7 +88,8 @@ Open `http://<host>:8787`. The API key is in Prowlarr under
 | Env var | Default | Description |
 |---|---|---|
 | `PROWLARR_API_KEY` | *(required)* | Prowlarr API key. |
-| `PROWLARR_URL` | `http://localhost:9696` | Base URL of the Prowlarr instance. |
+| `PROWLARR_URL` | `http://localhost:9696` | Base URL of the Prowlarr instance (server-to-Prowlarr). |
+| `PROWLARR_PUBLIC_URL` | *(unset)* | Browser-facing Prowlarr URL. When set, the report deep-links to Prowlarr (header + flagged indexers). Leave unset if `PROWLARR_URL` is a Docker-internal host the browser can't reach. |
 | `WINDOW_DAYS` | `90` | Recent window for trend columns + removal heuristic. |
 | `REFRESH_INTERVAL_MINUTES` | `15` | How often the service re-queries Prowlarr. |
 | `HOST` / `PORT` | `0.0.0.0` / `8787` | Bind address/port for the web UI. |

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Config:
     prowlarr_url: str
+    prowlarr_public_url: str
     api_key: str
     window_days: int
     refresh_interval_minutes: int
@@ -37,8 +38,13 @@ def load_config() -> Config:
             "PROWLARR_API_KEY is required. Set it in the environment "
             "(see .env.example)."
         )
+    # The browser-facing Prowlarr URL, used only to deep-link from the report to
+    # Prowlarr. It often differs from PROWLARR_URL: the server may reach Prowlarr
+    # at a Docker-internal host (http://prowlarr:9696) the user's browser can't
+    # resolve. Opt-in — when unset, the report shows no "Open Prowlarr" links.
     return Config(
         prowlarr_url=os.environ.get("PROWLARR_URL", "http://localhost:9696").rstrip("/"),
+        prowlarr_public_url=os.environ.get("PROWLARR_PUBLIC_URL", "").strip().rstrip("/"),
         api_key=api_key,
         window_days=_int_env("WINDOW_DAYS", 90),
         refresh_interval_minutes=_int_env("REFRESH_INTERVAL_MINUTES", 15),
