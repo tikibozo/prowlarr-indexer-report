@@ -25,8 +25,13 @@ let sortKey = 'grabsAll', sortDir = -1, lastRows = null;
 let tableFilter = 'all';     // all | remove | watch | manual | disabled
 let lastGeneratedAt = null;  // skip re-rendering charts/table when the snapshot is unchanged
 let prowlarrUrl = '';        // browser-facing Prowlarr URL (opt-in); '' = no deep-links
-let lastData = null;         // most recent snapshot, for re-rendering charts on demand
+let lastData = null;         // most recent snapshot, for re-rendering on demand
 let chartsStale = false;     // data changed while Analysis was collapsed; redraw on open
+// The server judges EVERY configured window each refresh, so switching windows
+// is a pure client-side re-projection — no /api/data round-trip, no Prowlarr hit.
+let selWindow = null;        // selected window key ('90', 'all', …); null until first data
+let windowsMeta = [];        // [{key, days, short, label}] as configured on the server
+const WINDOW_STORAGE_KEY = 'pir.window';
 const proColor = p => p === 'usenet' ? C.usenet : C.torrent;
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -62,6 +67,78 @@ function fmtAgo(iso) {
   if (secs < 60) return Math.round(secs) + 's ago';
   if (secs < 3600) return Math.round(secs / 60) + 'm ago';
   return Math.round(secs / 3600) + 'h ago';
+}
+
+/* ---- Time window ----------------------------------------------------------
+   Every indexer row carries a `byWindow` verdict per configured window; the
+   selection just decides which one is projected onto grabsWin/flag/reason. The
+   choice lives in the URL (shareable) and localStorage (sticky across visits),
+   falling back to the server's WINDOW_DAYS. ---------------------------------*/
+function windowsOf(d) {
+  if (Array.isArray(d.windows) && d.windows.length) return d.windows;
+  // Older/hand-rolled payloads with no window set: synthesize the single one.
+  const days = d.windowDays ?? null;
+  return [days == null
+    ? { key: 'all', days: null, short: 'All time', label: 'all retained history' }
+    : { key: String(days), days, short: days + 'd', label: 'the last ' + days + ' days' }];
+}
+function selMeta() {
+  return windowsMeta.find(w => w.key === selWindow) || windowsMeta[0] ||
+    { key: 'all', days: null, short: 'All time', label: 'all retained history' };
+}
+function storedWindow() {
+  const fromUrl = new URLSearchParams(location.search).get('window');
+  if (fromUrl) return fromUrl;
+  try { return localStorage.getItem(WINDOW_STORAGE_KEY); } catch { return null; }
+}
+// Resolve the selection against what this server actually offers, so a stale
+// URL/localStorage key (options changed) falls back instead of blanking the page.
+function ensureWindow(d) {
+  windowsMeta = windowsOf(d);
+  const keys = windowsMeta.map(w => w.key);
+  if (selWindow && keys.includes(selWindow)) return;
+  const wanted = selWindow || storedWindow();
+  selWindow = keys.includes(wanted) ? wanted
+    : (keys.includes(d.defaultWindow) ? d.defaultWindow : keys[0]);
+}
+function summaryFor(d) {
+  return (d.summaryByWindow && d.summaryByWindow[selWindow]) || d.summary || {};
+}
+// Flatten the selected window's verdict onto each row, so every renderer below
+// keeps reading plain grabsWin/flag/reason.
+function projectRows(d) {
+  return (d.indexers || []).map(r => {
+    const w = (r.byWindow && r.byWindow[selWindow]) || null;
+    if (!w) return r;
+    return { ...r, grabsWin: w.grabs, flag: w.flag, reason: w.reason };
+  });
+}
+
+function renderWindowBar(d) {
+  document.getElementById('windowSeg').innerHTML = windowsMeta.map(w =>
+    `<button data-window="${esc(w.key)}" aria-pressed="${w.key === selWindow}" ` +
+    `title="Judge every indexer over ${esc(w.label)}">${esc(w.short)}</button>`).join('');
+  // Prowlarr prunes its History table (default 30 days), so a window longer
+  // than what's retained silently reads the same as All time. Say so.
+  const span = (d.history || {}).spanDays;
+  const sel = selMeta();
+  const note = document.getElementById('windowNote');
+  note.textContent = (sel.days != null && span != null && sel.days > span)
+    ? `— only ${span}d of history retained, so this matches All time`
+    : '';
+}
+
+function setWindow(key) {
+  if (key === selWindow) return;
+  selWindow = key;
+  try { localStorage.setItem(WINDOW_STORAGE_KEY, key); } catch { /* private mode */ }
+  const url = new URL(location.href);
+  url.searchParams.set('window', key);
+  history.replaceState(null, '', url);
+  applyWindow();
+  document.getElementById('windowStatus').textContent =
+    'Time window set to ' + selMeta().label;
+  if (lastData) setStatus(lastData, null);
 }
 
 /* ---- Status / freshness ---- */
@@ -108,7 +185,7 @@ function setStatus(data, err) {
   dot.className = 'dot' + (stale ? ' stale' : '');
   announce(stale ? 'Data may be stale' : 'Live, data current');
   txt.textContent = 'data ' + fmtAgo(data.generatedAt) +
-    ' · window ' + data.windowDays + 'd' +
+    ' · window ' + selMeta().short.toLowerCase() +
     (data.refreshIntervalMinutes ? ' · server refresh ' + data.refreshIntervalMinutes + 'm' : '');
 }
 
@@ -119,10 +196,16 @@ function mkChart(id, cfg) {
 
 /* ---- Cards: inventory (quiet) + verdict (colored, clickable). ---- */
 function renderCards(s) {
+  const sel = selMeta();
   const inv = [
     ['Indexers', s.indexers], ['Enabled', s.enabled],
     ['Total grabs', (s.totalGrabs || 0).toLocaleString()],
   ];
+  // On a narrower window, say how much of that total landed inside it —
+  // otherwise "total grabs" is the one figure on the page ignoring the window.
+  if (sel.days != null && s.windowGrabs != null) {
+    inv.push([`Grabs · ${sel.short}`, (s.windowGrabs || 0).toLocaleString()]);
+  }
   const verdict = [
     ['remove', 'Remove candidates', s.removeCandidates, C.remove],
     ['watch', 'Watch (high cost)', s.watchCandidates, C.watch],
@@ -151,12 +234,13 @@ function renderVerdict(rows) {
   if (!removes.length && !watches.length) {
     vsub.textContent = '';
     document.getElementById('verdictBody').innerHTML =
-      `<div class="empty"><b>Nothing to prune.</b> Every enabled auto-search indexer is earning its keep — no removals or high-cost warnings in this window.</div>`;
+      `<div class="empty"><b>Nothing to prune.</b> Every enabled auto-search indexer is earning its keep — no removals or high-cost warnings over ${esc(selMeta().label)}.</div>`;
     return;
   }
-  vsub.textContent = removes.length
+  const over = ` · judged over ${selMeta().label}`;
+  vsub.textContent = (removes.length
     ? `— ${removes.length} safe to disable` + (watches.length ? `, ${watches.length} to watch` : '')
-    : `— ${watches.length} to watch, nothing to remove`;
+    : `— ${watches.length} to watch, nothing to remove`) + over;
 
   const item = r => {
     const last = r.lastGrab ? `last ${r.lastGrab}` : 'never grabbed';
@@ -184,8 +268,26 @@ function renderVerdict(rows) {
     `</div>`;
 }
 
-function renderCharts(d) {
-  const ROWS = d.indexers;
+/* Which windows the trend chart compares. Capped at four series so 15 indexers
+   stay readable: the tightest window (is it alive right now?), the step below
+   the selection (slope), the selection itself, and all-time as the reference. */
+function trendSeries() {
+  const picks = [];
+  const add = w => { if (w && !picks.some(p => p.key === w.key)) picks.push(w); };
+  const i = Math.max(0, windowsMeta.findIndex(w => w.key === selWindow));
+  add(windowsMeta[0]);
+  if (i > 1) add(windowsMeta[i - 1]);
+  add(selMeta());
+  add(windowsMeta.find(w => w.days == null) ||
+      { key: 'all', days: null, short: 'All time', label: 'all retained history' });
+  return picks.sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity));
+}
+// All-time is always the muted dotted reference; the shipped ok/usenet pair keeps
+// its meaning, and a third window borrows from the categorical (non-semantic) ramp.
+const TREND_STYLE = [[C.ok, 'solid'], [C.usenet, 'hatch'], [APP_COLORS[3], 'cross']];
+
+function renderCharts(d, rows) {
+  const ROWS = rows || d.indexers;
 
   mkChart('grabsBar', { type: 'bar', data: {
     labels: ROWS.map(r => r.name),
@@ -197,13 +299,18 @@ function renderCharts(d) {
         y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 11 } } } } } });
 
   const topRows = ROWS.slice(0, 15);
+  const series = trendSeries();
+  const grabsIn = (r, w) => w.days == null ? r.grabsAll : ((r.byWindow || {})[w.key] || {}).grabs ?? 0;
+  document.getElementById('trendSub').textContent =
+    series.map(w => w.short.toLowerCase()).join(' vs ') +
+    '. Flat-at-zero recent bars = gone cold.';
   mkChart('trend', { type: 'bar', data: {
     labels: topRows.map(r => r.name),
-    datasets: [
-      { label: '30d', data: topRows.map(r => r.grabs30), backgroundColor: pattern(C.ok, 'solid') },
-      { label: d.windowDays + 'd', data: topRows.map(r => r.grabsWin), backgroundColor: pattern(C.usenet, 'hatch') },
-      { label: 'all-time', data: topRows.map(r => r.grabsAll), backgroundColor: pattern(C.mut, 'dot') },
-    ] }, options: { animation: false, plugins: { legend: { position: 'bottom' } },
+    datasets: series.map((w, i) => {
+      const [color, tex] = w.days == null ? [C.mut, 'dot'] : TREND_STYLE[i % TREND_STYLE.length];
+      return { label: w.short, data: topRows.map(r => grabsIn(r, w)),
+               backgroundColor: pattern(color, tex) };
+    }) }, options: { animation: false, plugins: { legend: { position: 'bottom' } },
       scales: { x: { ticks: { font: { size: 10 }, maxRotation: 60, minRotation: 60 } }, y: { type: 'logarithmic' } } } });
 
   // Flag conveyed by point SHAPE as well as color, so it survives grayscale.
@@ -234,21 +341,30 @@ function renderCharts(d) {
     options: { animation: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 } } } } } });
 }
 
-const COLS = [
-  ['name', 'Indexer'], ['protocol', 'Proto'], ['priority', 'Prio'],
-  ['grabsAll', 'Grabs'], ['grabsWin', 'Win'], ['grabs30', '30d'],
-  ['queries', 'Queries'], ['grabRate', 'Grab %'], ['failRate', 'Fail %'],
-  ['respTime', 'Resp ms'], ['lastGrab', 'Last grab'], ['flag', 'Flag'], ['reason', 'Reason'],
-];
+// Columns, minus whichever would duplicate the selected window: on All time the
+// window column *is* the all-time grabs column, and on 30d it *is* the 30d column.
+function columns() {
+  const sel = selMeta();
+  const cols = [['name', 'Indexer'], ['protocol', 'Proto'], ['priority', 'Prio'],
+                ['grabsAll', 'Grabs']];
+  if (sel.days != null) cols.push(['grabsWin', sel.short]);
+  if (sel.days !== 30) cols.push(['grabs30', '30d']);
+  return cols.concat([
+    ['queries', 'Queries'], ['grabRate', 'Grab %'], ['failRate', 'Fail %'],
+    ['respTime', 'Resp ms'], ['lastGrab', 'Last grab'], ['flag', 'Flag'], ['reason', 'Reason'],
+  ]);
+}
 // Tooltips so the compact headers don't rely on the reader already knowing them.
 const COL_TITLES = {
   protocol: 'Protocol — usenet or torrent', priority: 'Prowlarr indexer priority (lower = preferred)',
-  grabsAll: 'Total grabs, all-time', grabsWin: `Grabs within the report window`,
+  grabsAll: 'Total grabs, all-time',
   grabs30: 'Grabs in the last 30 days', queries: 'Search queries sent to this indexer',
   grabRate: 'Grabs ÷ queries, as a percentage', failRate: 'Failed queries ÷ queries, as a percentage',
   respTime: 'Average query response time, milliseconds', lastGrab: 'Date of the most recent grab',
   flag: 'Verdict: remove / watch / manual', reason: 'Why this indexer got its verdict',
 };
+const colTitle = k => k === 'grabsWin'
+  ? `Grabs within ${selMeta().label}` : COL_TITLES[k];
 
 const FILTERS = [
   ['all', 'All', r => true],
@@ -271,6 +387,10 @@ function renderChips() {
 
 function renderTable() {
   if (!lastRows) return;
+  const COLS = columns();
+  // A window switch can retire the sorted column (e.g. sorting by "7d" then
+  // picking All time). Fall back rather than sorting by a key nothing shows.
+  if (!COLS.some(([k]) => k === sortKey)) { sortKey = 'grabsAll'; sortDir = -1; }
   const rows = lastRows.filter(filterFn(tableFilter));
   const r = [...rows].sort((a, b) => {
     let x = a[sortKey], y = b[sortKey];
@@ -281,7 +401,8 @@ function renderTable() {
     const sorted = sortKey === k;
     const ariaSort = sorted ? (sortDir < 0 ? 'descending' : 'ascending') : 'none';
     const arrow = sorted ? (sortDir < 0 ? ' ▾' : ' ▴') : '';
-    const title = COL_TITLES[k] ? ` title="${esc(COL_TITLES[k])}"` : '';
+    const t = colTitle(k);
+    const title = t ? ` title="${esc(t)}"` : '';
     return `<th aria-sort="${ariaSort}"><button data-k="${k}"${title}>${l}${arrow}</button></th>`;
   }).join('') + '</tr></thead>';
   const body = '<tbody>' + (r.length ? r.map(row => {
@@ -333,6 +454,28 @@ function setFilter(key, scroll) {
 
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+// Everything that depends on the selected window. Called on new data and on a
+// window switch — the latter needs no fetch, the verdicts are already local.
+function applyWindow() {
+  const d = lastData;
+  if (!d) return;
+  lastRows = projectRows(d);
+  renderWindowBar(d);
+  renderCards(summaryFor(d));
+  renderVerdict(lastRows);
+  renderChips();
+  renderTable();
+  // Only build/refresh charts while the Analysis panel is visible. Chart.js sizes
+  // to its container, so creating charts inside a collapsed <details> (display:none)
+  // bakes in a 0-size and the redraw on reopen is unreliable across browsers. When
+  // collapsed, defer: mark stale and (re)render on the next open.
+  if (analysisIsOpen()) { renderCharts(d, lastRows); chartsStale = false; }
+  else { chartsStale = true; }
+  // re-apply active state after cards re-render
+  document.querySelectorAll('.verdict-card').forEach(c =>
+    c.classList.toggle('active', c.dataset.filter === tableFilter));
+}
+
 function render(d) {
   // Skip the churn (chart destroy/recreate, table rebuild) when the server's
   // snapshot is unchanged — most 60s polls return the same data and a re-render
@@ -342,25 +485,12 @@ function render(d) {
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('report').style.display = 'block';
-  lastRows = d.indexers;
   prowlarrUrl = d.prowlarrUrl || '';
   const openLink = document.getElementById('openProwlarr');
   if (prowlarrUrl) { openLink.href = prowlarrUrl; openLink.hidden = false; }
   else { openLink.hidden = true; }
-  renderCards(d.summary);
-  renderVerdict(d.indexers);
-  renderChips();
-  renderTable();
-  // Only build/refresh charts while the Analysis panel is visible. Chart.js sizes
-  // to its container, so creating charts inside a collapsed <details> (display:none)
-  // bakes in a 0-size and the redraw on reopen is unreliable across browsers. When
-  // collapsed, defer: mark stale and (re)render on the next open.
   lastData = d;
-  if (analysisIsOpen()) { renderCharts(d); chartsStale = false; }
-  else { chartsStale = true; }
-  // re-apply active state after cards re-render
-  document.querySelectorAll('.verdict-card').forEach(c =>
-    c.classList.toggle('active', c.dataset.filter === tableFilter));
+  applyWindow();
 }
 
 async function poll() {
@@ -374,6 +504,7 @@ async function poll() {
       return;
     }
     const data = await resp.json();
+    ensureWindow(data);       // before setStatus/render — both read the selection
     setStatus(data, null);
     render(data);
   } catch (e) {
@@ -389,7 +520,7 @@ function analysisIsOpen() { return !analysisEl || analysisEl.open; }
 // charts are never sized inside a hidden container.
 if (analysisEl) analysisEl.addEventListener('toggle', () => {
   if (!analysisEl.open) return;
-  if (chartsStale && lastData) { renderCharts(lastData); chartsStale = false; }
+  if (chartsStale && lastData) { renderCharts(lastData, lastRows); chartsStale = false; }
   else requestAnimationFrame(() =>
     Object.values(charts).forEach(c => { try { c.resize(); } catch { /* chart gone */ } }));
 });
@@ -410,6 +541,12 @@ document.getElementById('cards').addEventListener('keydown', e => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   const card = e.target.closest('.verdict-card[data-filter]');
   if (card) { e.preventDefault(); setFilter(card.dataset.filter, true); }
+});
+
+// Time-window control.
+document.getElementById('windowSeg').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-window]');
+  if (btn) setWindow(btn.dataset.window);
 });
 
 // Filter chips.

@@ -7,8 +7,16 @@ The data layer is split in two so the analysis is trivially testable:
 
 Data sources (all read-only):
   * GET /api/v1/indexer        — name, protocol, enable, priority
-  * GET /api/v1/indexerstats   — per-indexer aggregates; accepts ?startDate=
-                                 &endDate= (ISO-8601 Z) for windowed totals.
+  * GET /api/v1/indexerstats   — per-indexer aggregates. Called ONCE, unwindowed,
+                                 for the all-time queries / failures / latency.
+                                 It accepts ?startDate=&endDate=, but we do NOT
+                                 use that: indexerstats aggregates the whole
+                                 History table, which is ~99% query events, so a
+                                 single call costs tens of seconds on a real
+                                 instance (57s against a 3.1M-row table) and
+                                 scales with the window. Windowed grab counts are
+                                 derived from the grab history below instead —
+                                 verified to match indexerstats exactly, and free.
   * GET /api/v1/history?eventType=1 — per-grab events carrying data.source
                                  (the consuming app) + date. The ONLY source
                                  of the per-app breakdown and grabs timeline.
@@ -30,6 +38,31 @@ def iso(dt: _dt.datetime) -> str:
 
 def now_utc() -> _dt.datetime:
     return _dt.datetime.now(_dt.UTC)
+
+
+# A window is a number of days, or ``None`` for "all retained history". The key
+# is what the UI and the JSON payload index windowed results by.
+ALL_TIME = "all"
+
+
+def window_key(days: int | None) -> str:
+    return ALL_TIME if days is None else str(days)
+
+
+def window_meta(days: int | None) -> dict:
+    """UI-facing description of one window: button text + spoken label."""
+    if days is None:
+        return {"key": ALL_TIME, "days": None, "short": "All time",
+                "label": "all retained history"}
+    if days % 365 == 0:
+        years = days // 365
+        label = "the last year" if years == 1 else f"the last {years} years"
+    elif days % 30 == 0 and days >= 60:
+        months = days // 30
+        label = f"the last {months} months"
+    else:
+        label = f"the last {days} days"
+    return {"key": str(days), "days": days, "short": f"{days}d", "label": label}
 
 
 class ProwlarrClient:
@@ -130,22 +163,92 @@ def _stats_by_id(rows: list[dict]) -> dict[int, dict]:
     return {r["indexerId"]: r for r in rows}
 
 
+def _verdict(
+    *,
+    enabled: bool,
+    auto_search: bool,
+    profile_name: str,
+    grabs_all: int,
+    grabs_win: int,
+    queries: int,
+    grab_rate: float,
+    window_short: str,
+    last: str,
+) -> tuple[str, str]:
+    """The flag + reason for one indexer, judged inside one window.
+
+    Flag precedence: disabled > manual (neutral) > remove/watch. Only auto-search
+    indexers are eligible for remove/watch — a manual/interactive-only profile is
+    *expected* to have no automated grabs, so it gets the neutral "manual" tag
+    instead of being called dead weight.
+
+    Only the "gone cold" branch is window-dependent, and on the all-time window
+    it is unreachable by construction (``grabs_win == grabs_all``), so an
+    indexer is never called cold over the same span that says it never grabbed.
+    """
+    if not enabled:
+        return ("disabled", "Already disabled, never grabbed") if grabs_all == 0 else ("", "")
+    if not auto_search:
+        return "manual", (
+            f"Manual/interactive-only profile ({profile_name}) — automatic search off"
+        )
+    if grabs_all == 0:
+        return "remove", f"Never grabbed anything ({queries} queries)"
+    if grabs_win == 0:
+        return "remove", f"No grabs in {window_short} (last: {last or 'unknown'})"
+    if queries >= 5000 and grab_rate < 0.005:
+        return "watch", f"High cost: {queries} queries, {grab_rate * 100:.2f}% grab rate"
+    return "", ""
+
+
 def compute_report(
     *,
     indexers: list[dict],
     all_stats: list[dict],
-    window_stats: list[dict],
-    d30_stats: list[dict],
     history: list[dict],
-    window_days: int,
+    windows: list[int | None],
+    window_days: int | None,
     generated_at: _dt.datetime,
     history_truncated: bool = False,
     app_profiles: list[dict] | None = None,
 ) -> dict:
-    """Pure transform of raw Prowlarr payloads into the report data model."""
+    """Pure transform of raw Prowlarr payloads into the report data model.
+
+    Every configured window is judged, not just the default one: each indexer
+    carries a ``byWindow`` block (grabs + flag + reason) and there is a summary
+    per window. The UI picks one and can switch instantly, because the verdict
+    for every window is already in the payload.
+
+    Windowed grab counts are counted out of ``history`` rather than fetched from
+    a windowed ``indexerstats`` call per window. Prowlarr derives both from the
+    same History table, so the numbers are identical (checked per-indexer over
+    7/30/90d against a live instance: exact match), but counting locally costs
+    nothing while each windowed API call costs seconds-to-a-minute. That is what
+    makes an arbitrary set of windows affordable.
+
+    All-time grabs still come from ``all_stats``, so a truncated history page
+    walk can never inflate or deflate the headline total.
+    """
+    metas = [window_meta(d) for d in windows]
+    if not metas:  # defensive: a window-less report has nothing to judge
+        metas = [window_meta(window_days)]
+    default_key = window_key(window_days)
+    if all(m["key"] != default_key for m in metas):
+        metas.append(window_meta(window_days))
+        metas.sort(key=lambda m: (1, 0) if m["days"] is None else (0, m["days"]))
+
     all_by = _stats_by_id(all_stats)
-    win_by = _stats_by_id(window_stats)
-    d30_by = _stats_by_id(d30_stats)
+
+    # Cutoffs for every finite window, plus the fixed 30d column. Dates are
+    # compared as ISO-8601 Z strings, which sort lexicographically — the same
+    # idiom the last-grab/month bucketing below already relies on.
+    def _cutoff(days: int) -> str:
+        return iso(generated_at - _dt.timedelta(days=days))
+
+    cutoffs = [(m["key"], _cutoff(m["days"])) for m in metas if m["days"] is not None]
+    d30_cutoff = _cutoff(30)
+    win_counts: dict[int, dict[str, int]] = {}
+    d30_counts: dict[int, int] = {}
 
     # appProfileId -> (auto-search enabled?, profile name). Missing profile
     # defaults to auto=True so we never hide a real auto indexer behind "manual".
@@ -171,6 +274,12 @@ def compute_report(
         if date:
             month = date[:7]
             timeline[month] = timeline.get(month, 0) + 1
+            for key, cut in cutoffs:
+                if date >= cut:
+                    bucket = win_counts.setdefault(iid, {})
+                    bucket[key] = bucket.get(key, 0) + 1
+            if date >= d30_cutoff:
+                d30_counts[iid] = d30_counts.get(iid, 0) + 1
             if iid not in last_grab or date > last_grab[iid]:
                 last_grab[iid] = date
             if earliest_grab is None or date < earliest_grab:
@@ -181,11 +290,9 @@ def compute_report(
     rows: list[dict] = []
     for ix in indexers:
         iid = ix["id"]
-        a, w, d = all_by.get(iid, {}), win_by.get(iid, {}), d30_by.get(iid, {})
+        a = all_by.get(iid, {})
         queries = a.get("numberOfQueries", 0) or 0
         grabs_all = a.get("numberOfGrabs", 0) or 0
-        grabs_win = w.get("numberOfGrabs", 0) or 0
-        grabs_30 = d.get("numberOfGrabs", 0) or 0
         failed_q = a.get("numberOfFailedQueries", 0) or 0
         grab_rate = (grabs_all / queries) if queries else 0.0
         fail_rate = (failed_q / queries) if queries else 0.0
@@ -193,62 +300,67 @@ def compute_report(
         pid = ix.get("appProfileId")
         auto_search = prof_auto.get(pid, True)
         profile_name = prof_name.get(pid, "")
+        enabled = bool(ix.get("enable", True))
+        last = (last_grab.get(iid, "") or "")[:10]
 
-        # Flag precedence: disabled > manual (neutral) > remove/watch. Only
-        # auto-search indexers are eligible for remove/watch — a manual/
-        # interactive-only profile is *expected* to have no automated grabs, so
-        # it gets the neutral "manual" tag instead of being called dead weight.
-        flag, reason = "", ""
-        if not ix.get("enable", True):
-            if grabs_all == 0:
-                flag, reason = "disabled", "Already disabled, never grabbed"
-        elif not auto_search:
-            flag, reason = "manual", (
-                f"Manual/interactive-only profile ({profile_name}) — automatic search off"
+        by_window: dict[str, dict] = {}
+        for m in metas:
+            # All-time is definitionally the whole of grabsAll, so it needs no
+            # windowed stats row to be correct even if Prowlarr omits the indexer.
+            grabs_win = (
+                grabs_all if m["days"] is None
+                else win_counts.get(iid, {}).get(m["key"], 0)
             )
-        elif grabs_all == 0:
-            flag, reason = "remove", f"Never grabbed anything ({queries} queries)"
-        elif grabs_win == 0:
-            last = (last_grab.get(iid, "") or "")[:10] or "unknown"
-            flag, reason = "remove", f"No grabs in {window_days}d (last: {last})"
-        elif queries >= 5000 and grab_rate < 0.005:
-            flag, reason = "watch", (
-                f"High cost: {queries} queries, {grab_rate * 100:.2f}% grab rate"
+            flag, reason = _verdict(
+                enabled=enabled, auto_search=auto_search, profile_name=profile_name,
+                grabs_all=grabs_all, grabs_win=grabs_win, queries=queries,
+                grab_rate=grab_rate, window_short=m["short"], last=last,
             )
+            by_window[m["key"]] = {"grabs": grabs_win, "flag": flag, "reason": reason}
 
+        sel = by_window[default_key]
         rows.append(
             {
                 "id": iid,
                 "name": ix.get("name", "?"),
                 "protocol": ix.get("protocol", "?"),
-                "enabled": bool(ix.get("enable", True)),
+                "enabled": enabled,
                 "priority": ix.get("priority", 25),
                 "grabsAll": grabs_all,
-                "grabsWin": grabs_win,
-                "grabs30": grabs_30,
+                # grabsWin/flag/reason are the default window's verdict, kept at
+                # the top level so /api/data stays readable for scripts that
+                # don't care about window switching.
+                "grabsWin": sel["grabs"],
+                "grabs30": d30_counts.get(iid, 0),
                 "queries": queries,
                 "grabRate": round(grab_rate * 100, 3),
                 "failRate": round(fail_rate * 100, 3),
                 "respTime": a.get("averageResponseTime", 0) or 0,
                 "grabRespTime": a.get("averageGrabResponseTime", 0) or 0,
-                "lastGrab": (last_grab.get(iid, "") or "")[:10],
+                "lastGrab": last,
                 "perApp": per_app.get(iid, {}),
                 "autoSearch": auto_search,
                 "appProfile": profile_name,
-                "flag": flag,
-                "reason": reason,
+                "flag": sel["flag"],
+                "reason": sel["reason"],
+                "byWindow": by_window,
             }
         )
 
     rows.sort(key=lambda r: r["grabsAll"], reverse=True)
-    summary = {
-        "indexers": len(rows),
-        "enabled": sum(1 for r in rows if r["enabled"]),
-        "totalGrabs": sum(r["grabsAll"] for r in rows),
-        "removeCandidates": sum(1 for r in rows if r["flag"] == "remove"),
-        "watchCandidates": sum(1 for r in rows if r["flag"] == "watch"),
-        "manual": sum(1 for r in rows if r["flag"] == "manual"),
-    }
+
+    def _summary(key: str) -> dict:
+        return {
+            "indexers": len(rows),
+            "enabled": sum(1 for r in rows if r["enabled"]),
+            "totalGrabs": sum(r["grabsAll"] for r in rows),
+            "windowGrabs": sum(r["byWindow"][key]["grabs"] for r in rows),
+            "removeCandidates": sum(1 for r in rows if r["byWindow"][key]["flag"] == "remove"),
+            "watchCandidates": sum(1 for r in rows if r["byWindow"][key]["flag"] == "watch"),
+            "manual": sum(1 for r in rows if r["byWindow"][key]["flag"] == "manual"),
+        }
+
+    summary_by_window = {m["key"]: _summary(m["key"]) for m in metas}
     span_days = None
     if earliest_grab and latest_grab:
         span_days = (_dt.datetime.fromisoformat(latest_grab.replace("Z", "+00:00"))
@@ -256,7 +368,10 @@ def compute_report(
     return {
         "generatedAt": iso(generated_at),
         "windowDays": window_days,
-        "summary": summary,
+        "defaultWindow": default_key,
+        "windows": metas,
+        "summary": summary_by_window[default_key],
+        "summaryByWindow": summary_by_window,
         # Span of grab history Prowlarr actually retains (bounded by its
         # historycleanupdays). historyTruncated flags the rare case where paging
         # hit its page cap, so the UI can warn instead of silently undercounting.
@@ -272,25 +387,29 @@ def compute_report(
     }
 
 
-async def build_report(client: ProwlarrClient, window_days: int) -> dict:
-    """Fetch everything from Prowlarr and compute the report data model."""
+async def build_report(
+    client: ProwlarrClient,
+    windows: list[int | None],
+    window_days: int | None,
+) -> dict:
+    """Fetch everything from Prowlarr and compute the report data model.
+
+    Exactly one ``indexerstats`` call, regardless of how many windows are
+    configured — windowed grab counts come out of the history walk instead (see
+    ``compute_report``). Adding a window is therefore free at the API layer.
+    """
     now = now_utc()
-    window_start = now - _dt.timedelta(days=window_days)
-    d30_start = now - _dt.timedelta(days=30)
 
     indexers = await client.indexers()
     app_profiles = await client.app_profiles()
     all_stats = await client.stats()
-    window_stats = await client.stats(window_start, now)
-    d30_stats = await client.stats(d30_start, now)
     history, history_truncated = await client.history_grabs()
 
     return compute_report(
         indexers=indexers,
         all_stats=all_stats,
-        window_stats=window_stats,
-        d30_stats=d30_stats,
         history=history,
+        windows=windows,
         window_days=window_days,
         generated_at=now,
         history_truncated=history_truncated,

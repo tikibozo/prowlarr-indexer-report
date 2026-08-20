@@ -5,18 +5,20 @@ report you can act on: it ranks every indexer by **grabs**, shows **recent
 trend**, exposes **query cost / failure / latency**, breaks grabs down by the
 **consuming app** (Sonarr/Radarr/Lidarr/…), and **flags indexers that are safe
 to disable** — so you can tell which of your indexers actually earn their keep.
+A **time window** picker re-judges the whole report over the last 7 days through
+all retained history, with no reload.
 
 The page is live: a background task re-queries Prowlarr on an interval and the
 UI polls for the latest snapshot, so charts stay current without a reload.
 
-![Prowlarr Indexer Usefulness Report — a verdict-first dark dashboard: summary cards with remove/watch/manual counts, a "verdict" panel listing the indexers safe to disable with the reason for each, a filterable sortable table of every indexer, and a collapsible Analysis section (grabs by indexer, recent trend, efficiency scatter, per-app source breakdown, grabs-over-time). Shown with demo data; indexer names are fictional.](docs/report.png)
+![Prowlarr Indexer Usefulness Report — a verdict-first dark dashboard: a time-window selector (7d through All time) governing the page, summary cards with remove/watch/manual counts, a "verdict" panel listing the indexers safe to disable with the reason for each, a filterable sortable table of every indexer, and a collapsible Analysis section (grabs by indexer, recent trend across windows, efficiency scatter, per-app source breakdown, grabs-over-time). Shown with demo data; indexer names are fictional.](docs/report.png)
 
 ## How it works
 
 ```
 Prowlarr v1 API ──(every REFRESH_INTERVAL_MINUTES)──► background refresh
    ├─ GET /api/v1/indexer        (name, protocol, enable, priority)
-   ├─ GET /api/v1/indexerstats   (grabs/queries/fails, all-time + 90d + 30d)
+   ├─ GET /api/v1/indexerstats   (all-time grabs/queries/fails — ONE call)
    └─ GET /api/v1/history        (per-grab events → per-app split + timeline)
                                           │
                                    cached report
@@ -24,10 +26,44 @@ Prowlarr v1 API ──(every REFRESH_INTERVAL_MINUTES)──► background refre
    browser ◄── GET /api/data (polled) ◄── FastAPI ── GET / (UI), /healthz
 ```
 
-All Prowlarr calls are **read-only**. Grab counts (all-time / window / 30d) come
-straight from `indexerstats`, which accepts `startDate`/`endDate`. The per-app
-breakdown and the monthly timeline are reconstructed from grab history (the only
-endpoint that records which app consumed each grab).
+All Prowlarr calls are **read-only**. All-time grabs, query counts, failures and
+latency come straight from a single `indexerstats` call. Everything time-bounded
+— per-window grab counts, the per-app breakdown and the monthly timeline — is
+reconstructed from grab history, which is also the only endpoint that records
+which app consumed each grab (see [Time window](#time-window) for why windows
+are counted rather than queried).
+
+### Time window
+
+Every number that can be time-bounded — the window column, the recent-trend
+chart, and the **remove** heuristic — is judged over a window you pick in the
+header: **7d / 30d / 90d / 180d / 365d / All time** by default. The selection
+lives in the URL (`?window=30`), so a particular view is shareable, and sticks
+in `localStorage` between visits.
+
+Switching is instant and costs Prowlarr nothing: each refresh judges *every*
+configured window server-side and ships them all in one payload, so the browser
+is only re-projecting data it already has.
+
+**Adding a window is free.** `indexerstats` accepts `startDate`/`endDate`, but
+the report deliberately does not use it: that endpoint aggregates Prowlarr's
+entire History table, which is overwhelmingly *query* events, so one windowed
+call can take tens of seconds and gets slower the wider the window (measured on
+a 3.1M-row instance: 2.6s for 7d, 21s for 90d, 57s unwindowed). Instead the
+report counts each window out of the grab history it already pages — Prowlarr
+derives both from the same table, so the counts are identical (verified
+per-indexer against `indexerstats` over 7/30/90d: exact match). A refresh makes
+exactly **one** `indexerstats` call no matter how many windows you configure.
+
+Pick the window to match the question you're asking. A short window answers
+"who earned their keep *this week*" and flags anything quiet since as removable;
+**All time** answers "who has *ever* earned their keep", where the only removal
+candidates are indexers that never grabbed at all. Every flag names the window
+it was judged over (`No grabs in 30d (last: …)`), so a verdict is never quoted
+out of context.
+
+Configure the offered set with `WINDOW_OPTIONS` and the initial selection with
+`WINDOW_DAYS`; both accept `all` for all retained history.
 
 ### History coverage
 
@@ -54,7 +90,9 @@ Each enabled indexer gets at most one flag, in priority order:
   *expected* here, so these are never called dead weight — they're broken out so
   the remove/watch heuristics don't fire on them.
 - **remove** — an **auto-search** indexer that never grabbed anything (pure query
-  cost) or has no grabs within the recent window (gone cold; last-grab date shown).
+  cost) or has no grabs within the selected window (gone cold; last-grab date
+  shown). On **All time** only the never-grabbed case can fire, since there is no
+  span outside the window for a grab to fall into.
 - **watch** — an **auto-search** indexer with high query volume (≥5000) but a grab
   rate under 0.5% (lots of cost for little return).
 
@@ -74,6 +112,7 @@ services:
       - PROWLARR_URL=http://prowlarr:9696
       - PROWLARR_API_KEY=<your-prowlarr-api-key>
       - WINDOW_DAYS=90
+      - WINDOW_OPTIONS=7,30,90,180,365,all
       - REFRESH_INTERVAL_MINUTES=15
     ports:
       - 8787:8787
@@ -90,7 +129,8 @@ Open `http://<host>:8787`. The API key is in Prowlarr under
 | `PROWLARR_API_KEY` | *(required)* | Prowlarr API key. |
 | `PROWLARR_URL` | `http://localhost:9696` | Base URL of the Prowlarr instance (server-to-Prowlarr). |
 | `PROWLARR_PUBLIC_URL` | *(unset)* | Browser-facing Prowlarr URL. When set, the report deep-links to Prowlarr (header + flagged indexers). Leave unset if `PROWLARR_URL` is a Docker-internal host the browser can't reach. |
-| `WINDOW_DAYS` | `90` | Recent window for trend columns + removal heuristic. |
+| `WINDOW_DAYS` | `90` | Window selected when the report first loads. Accepts `all` for all retained history. Always added to `WINDOW_OPTIONS`. |
+| `WINDOW_OPTIONS` | `7,30,90,180,365,all` | Windows offered in the picker, in days (`all` = all retained history). Free — no extra Prowlarr calls per window. |
 | `REFRESH_INTERVAL_MINUTES` | `15` | How often the service re-queries Prowlarr. |
 | `HOST` / `PORT` | `0.0.0.0` / `8787` | Bind address/port for the web UI. |
 
@@ -99,7 +139,7 @@ Open `http://<host>:8787`. The API key is in Prowlarr under
 | Path | Purpose |
 |---|---|
 | `GET /` | Live report UI. |
-| `GET /api/data` | Cached report as JSON. `503` until the first fetch completes. |
+| `GET /api/data` | Cached report as JSON — every window's verdict in one payload (`windows`, `summaryByWindow`, and a per-indexer `byWindow`; the top-level `flag`/`grabsWin` mirror `WINDOW_DAYS`). `503` until the first fetch completes. |
 | `POST /api/refresh` | Force an out-of-band refresh (the UI's "Refresh now" button). |
 | `GET /healthz` | Liveness; reports last success/error without failing on a transient Prowlarr outage. |
 

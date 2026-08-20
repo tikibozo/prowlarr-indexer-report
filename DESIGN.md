@@ -200,6 +200,11 @@ Shadow exists in exactly three places, and only ever as a *state* signal, never 
 - **Style:** pill-shaped (20px), Raised Slate fill, Muted text, Hairline border. Carry a live count (e.g. "Remove 3").
 - **State:** the active filter switches to Console Slate fill + Ink text + Muted border, mirrored by `aria-pressed`. Selection is also reflected on the corresponding verdict card's active ring.
 
+### Time Window (segmented control)
+- **Style:** a labelled segment group above the summary cards — Raised Slate track, Hairline border, 8px radius, holding one flat 6px-radius segment per configured window ("7d … All time"), Muted text, tabular numerals.
+- **State:** the selected segment lifts to Console Slate + Ink with a 1px inset ring, mirrored by `aria-pressed` (the same pattern as the filter chips). The group is a `role="group"` labelled by its "Time window" caption, and a change is announced through a visually-hidden `aria-live` region.
+- **Scope:** it governs the entire page — verdict, cards, table, and charts — so it sits above them all rather than inside any one panel. Any window longer than the history Prowlarr actually retains earns a Muted note beside the control saying so, rather than silently reading like All time.
+
 ### Cards / Containers
 - **Corner style:** 10px (`{rounded.md}`); the verdict panel is one step softer at 12px.
 - **Background:** inventory cards on Raised Slate; verdict cards on Console Slate (one tonal step up) to mark them as the actionable set.
@@ -229,7 +234,7 @@ First load shows **skeleton** tiles (cards + verdict + table) with a shimmer, no
 - **Do** pair every semantic color with a text label or shape — pills, point shapes, bar patterns. Assume grayscale and color-blindness.
 - **Do** build depth from tonal layers (Operator Navy → Raised Slate → Console Slate) and 1px Hairlines. Raise a surface a step before you reach for a border change; never reach for a shadow.
 - **Do** keep Muted (`#8a96ad`) as the floor for secondary text — it passes AA on both dark surfaces. Verify any new text color against its actual background.
-- **Do** state the reason and data window on every flag. Confidence comes from transparency.
+- **Do** state the reason and data window on every flag. Confidence comes from transparency — when the window is adjustable, name it in the verdict heading, the column header, and each reason, so no ruling can be read out of context.
 - **Do** keep one system font; build hierarchy from weight and size.
 
 ### Don't:

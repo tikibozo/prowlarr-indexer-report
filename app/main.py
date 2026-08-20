@@ -28,6 +28,10 @@ log = logging.getLogger("prowlarr-indexer-report")
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+def _window_label(days: int | None) -> str:
+    return "all" if days is None else f"{days}d"
+
+
 class State:
     """Holds the latest report + refresh bookkeeping."""
 
@@ -44,7 +48,11 @@ class State:
             return
         self.refreshing = True
         try:
-            self.data = await build_report(self.client, self.config.window_days)
+            self.data = await build_report(
+                self.client,
+                list(self.config.window_options),
+                self.config.default_window_days,
+            )
             self.last_success = self.data["generatedAt"]
             self.last_error = None
             log.info(
@@ -77,9 +85,10 @@ async def lifespan(app: FastAPI):
     state.config = cfg
     state.client = ProwlarrClient(cfg.prowlarr_url, cfg.api_key)
     log.info(
-        "starting: prowlarr=%s window=%dd refresh=%dmin",
+        "starting: prowlarr=%s window=%s of %s refresh=%dmin",
         cfg.prowlarr_url,
-        cfg.window_days,
+        _window_label(cfg.default_window_days),
+        ",".join(_window_label(d) for d in cfg.window_options),
         cfg.refresh_interval_minutes,
     )
     task = asyncio.create_task(_refresh_loop(cfg.refresh_interval_seconds))
