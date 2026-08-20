@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.6.0...v0.6.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **docker:** drop pip from the runtime image to clear the Trivy gate ([#27](https://github.com/tikibozo/prowlarr-indexer-report/issues/27)) ([bf3c35e](https://github.com/tikibozo/prowlarr-indexer-report/commit/bf3c35e34e54704fff41ab20d1a0bed548e7e227))
+
 ## [0.6.0](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.5.2...v0.6.0) (2026-08-20)
 
 
