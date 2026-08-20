@@ -33,8 +33,11 @@ def now_utc() -> _dt.datetime:
 
 
 class ProwlarrClient:
-    def __init__(self, base_url: str, api_key: str, *, timeout: float = 60.0) -> None:
+    # 60s was too tight: a single unwindowed indexerstats call measured 57s on a
+    # real instance (3.1M history rows), so refreshes failed ~40% of the time.
+    def __init__(self, base_url: str, api_key: str, *, timeout: float = 300.0) -> None:
         self._base = base_url.rstrip("/")
+        self._timeout = timeout
         self._client = httpx.AsyncClient(
             base_url=self._base,
             headers={"X-Api-Key": api_key},
@@ -45,7 +48,14 @@ class ProwlarrClient:
         await self._client.aclose()
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        resp = await self._client.get(path, params=params)
+        try:
+            resp = await self._client.get(path, params=params)
+        except httpx.TimeoutException as exc:
+            # httpx timeouts stringify to "" — name the endpoint so the UI banner
+            # says which Prowlarr call is slow instead of a bare "ReadTimeout: ".
+            raise TimeoutError(
+                f"{type(exc).__name__} after {self._timeout:g}s on {path}"
+            ) from exc
         resp.raise_for_status()
         return resp.json()
 
