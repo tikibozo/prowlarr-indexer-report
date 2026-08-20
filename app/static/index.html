@@ -45,6 +45,18 @@
   .btn-link:hover{border-color:var(--mut)}
   :focus-visible{outline:2px solid var(--usenet);outline-offset:2px;border-radius:7px}
 
+  /* ---- Time window: a page-global segmented control ---- */
+  .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:16px 28px 0}
+  .tb-label{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  .seg{display:inline-flex;flex-wrap:wrap;gap:2px;padding:2px;background:var(--panel);
+       border:1px solid var(--line);border-radius:8px}
+  .seg button{background:transparent;border:1px solid transparent;border-radius:6px;
+              padding:4px 11px;color:var(--mut);font-variant-numeric:tabular-nums}
+  .seg button:hover{color:var(--ink);background:var(--panel-2);border-color:transparent}
+  .seg button[aria-pressed="true"]{background:var(--panel-2);color:var(--ink);
+              box-shadow:inset 0 0 0 1px var(--line)}
+  .tb-note{color:var(--mut);font-size:12px}
+
   .banner{margin:10px 28px 0;padding:8px 14px;border-radius:7px;
           background:color-mix(in srgb,var(--remove) 12%,transparent);
           border:1px solid color-mix(in srgb,var(--remove) 40%,transparent);
@@ -152,6 +164,7 @@
   .skeleton{padding:16px 28px}
   .sk{background:linear-gradient(100deg,var(--panel) 30%,var(--panel-2) 50%,var(--panel) 70%);
       background-size:200% 100%;border-radius:10px;animation:sk 1.3s ease-in-out infinite}
+  .sk-toolbar{height:30px;width:340px;margin-bottom:16px}
   .sk-cards{display:flex;flex-wrap:wrap;gap:14px}
   .sk-card{width:148px;height:64px}
   .sk-verdict{height:150px;margin-top:14px}
@@ -164,7 +177,7 @@
 
   /* ---- Responsive: stack the chart grid and tighten gutters ---- */
   @media (max-width:900px){
-    header,.cards{padding-left:18px;padding-right:18px}
+    header,.cards,.toolbar{padding-left:18px;padding-right:18px}
     .verdict,.section,details.analysis{margin-left:18px;margin-right:18px}
     .grid{grid-template-columns:1fr}
     .wide{grid-column:auto}
@@ -189,6 +202,7 @@
 
 <!-- Skeleton shown until first data arrives -->
 <div id="loading" class="skeleton" aria-hidden="true">
+  <div class="sk sk-toolbar"></div>
   <div class="sk-cards">
     <div class="sk sk-card"></div><div class="sk sk-card"></div><div class="sk sk-card"></div>
     <div class="sk sk-card"></div><div class="sk sk-card"></div><div class="sk sk-card"></div>
@@ -198,6 +212,15 @@
 </div>
 
 <div id="report" style="display:none">
+  <!-- Governs the whole page: the verdict, the table, and the charts are all
+       judged over the selected window. -->
+  <div class="toolbar">
+    <span class="tb-label" id="windowLabel">Time window</span>
+    <div class="seg" id="windowSeg" role="group" aria-labelledby="windowLabel"></div>
+    <span class="tb-note" id="windowNote"></span>
+    <span class="vh" id="windowStatus" role="status" aria-live="polite"></span>
+  </div>
+
   <div class="cards" id="cards"></div>
 
   <!-- The verdict leads: what to disable, surfaced before the evidence. -->
@@ -227,7 +250,7 @@
           <span class="legend"><span class="legk"><i>■</i> usenet</span><span class="legk"><i>▨</i> torrent (hatched)</span></span></div>
         <canvas id="grabsBar"></canvas></div>
       <div class="panel"><h2>Recent trend</h2>
-        <div class="h">30d vs window vs all-time. Flat-at-zero recent bars = gone cold.</div>
+        <div class="h" id="trendSub">Flat-at-zero recent bars = gone cold.</div>
         <canvas id="trend"></canvas></div>
       <div class="panel"><h2>Efficiency — grabs vs query cost</h2>
         <div class="h">Log-x queries vs grabs. Bottom-right = lots of queries, few grabs.
