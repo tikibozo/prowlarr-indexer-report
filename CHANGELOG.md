@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.5.2...v0.6.0) (2026-08-20)
+
+
+### Features
+
+* configurable time window, including All time ([de62c09](https://github.com/tikibozo/prowlarr-indexer-report/commit/de62c09bf567c11219dba641ee5a05750123bda8))
+
+
+### Bug Fixes
+
+* **prowlarr:** stop refreshes timing out against a large history table ([729610c](https://github.com/tikibozo/prowlarr-indexer-report/commit/729610cc1a5d931b3ee8db808c59dd72771350d6))
+
 ## [0.5.2](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.5.1...v0.5.2) (2026-06-26)
 
 
