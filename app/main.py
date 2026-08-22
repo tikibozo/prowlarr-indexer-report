@@ -10,6 +10,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Response
 from fastapi.responses import FileResponse, JSONResponse
@@ -30,6 +31,33 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def _window_label(days: int | None) -> str:
     return "all" if days is None else f"{days}d"
+
+
+# Assets must be revalidated on every load, never served blind from cache.
+CACHE_CONTROL = "no-cache"
+
+
+class RevalidatingStaticFiles(StaticFiles):
+    """Static assets that must be revalidated rather than heuristically cached.
+
+    Starlette sends ``ETag``/``Last-Modified`` but no ``Cache-Control``. With no
+    explicit directive a browser falls back to *heuristic* freshness (a fraction
+    of the time since Last-Modified) and may reuse a cached file without asking.
+    After an upgrade that pairs a fresh ``index.html`` with a stale ``app.js``,
+    which renders a convincingly broken UI — controls that don't appear, table
+    headers from the previous version — and reads as a bad deploy even though
+    the server is serving the new asset correctly.
+
+    ``no-cache`` means "you may store it, but revalidate before using it", so the
+    ETag still makes the steady state a tiny 304 rather than a re-download. The
+    header is applied to the 304 as well, since that is what refreshes the
+    browser's stored directives for next time.
+    """
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = CACHE_CONTROL
+        return response
 
 
 class State:
@@ -101,7 +129,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="prowlarr-indexer-report", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", RevalidatingStaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/healthz")
@@ -151,7 +179,11 @@ async def api_refresh() -> JSONResponse:
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # Same revalidate-before-use rule as /static (see RevalidatingStaticFiles):
+    # the page and the script it loads have to move in lockstep.
+    return FileResponse(
+        STATIC_DIR / "index.html", headers={"Cache-Control": CACHE_CONTROL}
+    )
 
 
 def main() -> None:
