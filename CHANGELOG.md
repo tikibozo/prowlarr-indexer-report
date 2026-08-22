@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.6.1...v0.6.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **http:** make the UI revalidate its assets instead of caching them blind ([#29](https://github.com/tikibozo/prowlarr-indexer-report/issues/29)) ([6ad02d9](https://github.com/tikibozo/prowlarr-indexer-report/commit/6ad02d94f3b0cf5f6e4133f40071b925193f1fdd))
+
 ## [0.6.1](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.6.0...v0.6.1) (2026-08-20)
 
 
