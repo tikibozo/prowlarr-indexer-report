@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.6.2...v0.6.3) (2026-10-18)
+
+
+### Bug Fixes
+
+* **deps:** update python to v3.15 ([#32](https://github.com/tikibozo/prowlarr-indexer-report/issues/32)) ([1b4ef2d](https://github.com/tikibozo/prowlarr-indexer-report/commit/1b4ef2d2e4e6b77c5d2c1bfdd10f223330076f99))
+
 ## [0.6.2](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.6.1...v0.6.2) (2026-08-22)
 
 
