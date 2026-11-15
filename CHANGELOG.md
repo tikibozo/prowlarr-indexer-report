@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.6.3...v0.6.4) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency opentelemetry-api to v1.45.2 [security] ([#36](https://github.com/tikibozo/prowlarr-indexer-report/issues/36)) ([80bc984](https://github.com/tikibozo/prowlarr-indexer-report/commit/80bc9843a4d2268bd42f6605b79ae1dfb1a8f473))
+
 ## [0.6.3](https://github.com/tikibozo/prowlarr-indexer-report/compare/v0.6.2...v0.6.3) (2026-10-18)
 
 
